@@ -1,0 +1,64 @@
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import assert from "node:assert/strict";
+
+const files = await Promise.all(["public/index.html", "public/app.js", "public/styles.css", "README.md"].map((path) => readFile(new URL(`../${path}`, import.meta.url), "utf8")));
+const source = files.join("\n");
+
+test("does not expose personal contact details", () => {
+  assert.doesNotMatch(source, /[\w.+-]+@[\w.-]+\.[a-z]{2,}/i);
+});
+
+test("prevents referrer leakage and labels the public actor", () => {
+  assert.match(source, /name="referrer" content="no-referrer"/);
+  assert.match(source, /noopener,noreferrer/);
+  assert.match(source, /actor: "Mabolla Agent"/);
+});
+
+test("contains no fabricated seed missions", () => {
+  assert.equal(source.includes("TR-099"), false);
+  assert.equal(source.includes("TR-103"), false);
+  assert.equal(source.includes("TR-104"), false);
+});
+
+test("does not claim delivery before Technocore confirmation", () => {
+  assert.match(source, /delivery: "pending"/);
+  assert.match(source, /AWAITING CONFIRMATION/);
+  assert.match(source, /delivery: "verified"/);
+});
+
+test("renders the accepted Technocore mission as network proof", () => {
+  assert.match(source, /TR-1787597573199/);
+  assert.match(source, /proof: "https:\/\/technocore\.chat\/r\/mabolla-task-relay"/);
+});
+
+test("supports cross-DID claim and claimant completion", () => {
+  assert.match(source, /CLAIM WITH YOUR DID/);
+  assert.match(source, /COMPLETE WITH YOUR DID/);
+  assert.match(source, /identity\?\.did === created\.did/);
+  assert.match(source, /identity\?\.did === event\.did/);
+});
+
+test("persists signed events before opening Technocore", () => {
+  const persist = source.indexOf("localStorage.setItem(EVENTS_KEY");
+  const open = source.indexOf('window.open(url, "_blank"');
+  assert.ok(persist !== -1 && open !== -1 && persist < open);
+});
+
+test("implements the endorsed Technocore identity proof sequence", () => {
+  assert.match(source, /SHA-256/);
+  assert.match(source, /\/kv\/did\/\$\{fp\}\/set/);
+  assert.match(source, /const room = "lobby"/);
+  assert.match(source, /mabolla-technocore-identity\.json/);
+  assert.match(source, /AES-GCM/);
+  assert.match(source, /PBKDF2/);
+  assert.match(source, /technocore-ed25519-encrypted-v1/);
+});
+
+test("attributes new signed events to the visitor's chosen agent name", () => {
+  assert.match(source, /Choose the public agent name/);
+  assert.match(source, /agentNameOf\(identity\)/);
+  assert.match(source, /eventPayload\(String\(data\.get\("title"\)\), String\(data\.get\("detail"\)\), agentNameOf\(identity\)\)/);
+  assert.match(source, /transitionPayload\(type, mission, agentNameOf\(identity\)\)/);
+  assert.match(source, /identity \? "COPY" : "CREATE LOCAL DID"/);
+});

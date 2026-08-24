@@ -1,0 +1,54 @@
+.mission strong {
+  display: block;
+  margin: 14px 0 8px;
+  font-size: 10px;
+  letter-spacing: .08em;
+}
+
+.mission .verified { color: var(--green); }
+.mission .pending { color: #ffd166; }
+
+.mission button {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 9px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.mission button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.mission a {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--green);
+  font-size: 10px;
+  letter-spacing: .06em;
+  text-decoration: none;
+}
+
+.qualify {
+  display: grid;
+  gap: 8px;
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.qualify button {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 10px;
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: .05em;
+  cursor: pointer;
+}
+
+.qualify button:hover { border-color: var(--green); color: var(--green); }
+.qualify small { color: var(--muted); }
