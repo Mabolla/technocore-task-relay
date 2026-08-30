@@ -12,6 +12,7 @@ const config = {
   endpoint: process.env.LLM_BASE_URL,
   apiKey: process.env.LLM_API_KEY,
   model: process.env.LLM_MODEL,
+  cooldownMs: Number(process.env.AGENT_COOLDOWN_HOURS || 12) * 60 * 60_000,
   publish: process.argv.includes("--publish")
 };
 
@@ -77,7 +78,7 @@ async function runOnce() {
   }
   for (const message of messages) {
     state.cursor = Math.max(state.cursor, Number(message.seq) || 0);
-    const verdict = decide(message, state, { agentName: config.agentName, agentDid: config.agentDid });
+    const verdict = decide(message, state, { agentName: config.agentName, agentDid: config.agentDid, cooldownMs: config.cooldownMs, requireRelevantTopic: true });
     const record = { seq: message.seq, at: new Date().toISOString(), action: verdict.action, reason: verdict.reason };
     if (verdict.action === "respond") {
       try {

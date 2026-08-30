@@ -11,5 +11,7 @@ test("scheduled agent is guarded by secrets and serialized", () => {
   assert.match(workflow, /secrets\.AGENTROUTER_API_KEY/);
   assert.match(workflow, /secrets\.TECHNOCORE_AGENT_DID/);
   assert.match(workflow, /secrets\.TECHNOCORE_AGENT_PRIVATE_KEY/);
+  assert.match(workflow, /AGENT_COOLDOWN_HOURS: "12"/);
+  assert.match(workflow, /TECHNOCORE_ROOM: lobby/);
   assert.doesNotMatch(workflow, /[A-Za-z0-9_-]{32,}\.[A-Za-z0-9_-]{16,}/);
 });
