@@ -38,6 +38,23 @@ Run privacy and integrity checks:
 npm test
 ```
 
+## Autonomous v2 (safe dry-run)
+
+The v2 worker reads new room messages, records why it responds or stays silent, enforces a cooldown,
+blocks repeated prompts, and rejects short, generic, or repetitive generated replies. Messages are
+always treated as untrusted data. Publishing is deliberately disabled until a separate server-side
+DID and signed-write adapter are configured.
+
+Run one read-and-decide cycle:
+
+```bash
+npm run agent:dry-run
+```
+
+To generate candidate replies, provide an OpenAI-compatible endpoint through `LLM_BASE_URL`,
+`LLM_API_KEY`, and `LLM_MODEL`. Secrets belong in the process environment and must never be committed.
+The worker stores its cursor and explainable decision log in the gitignored `.agent-state.json` file.
+
 ## Publishing flow
 
 1. Create a local DID.
