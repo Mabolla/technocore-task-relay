@@ -1,4 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { createPrivateKey, sign as signBytes } from "node:crypto";
 import { decide, normalize, validateReply } from "./decision-engine.mjs";
 
 const config = {
@@ -6,12 +7,33 @@ const config = {
   room: process.env.TECHNOCORE_ROOM || "mabolla-task-relay",
   agentName: process.env.AGENT_NAME || "Mabolla Relay",
   agentDid: process.env.AGENT_DID || "",
+  privateKey: process.env.AGENT_PRIVATE_KEY_BASE64 || "",
   stateFile: process.env.AGENT_STATE_FILE || ".agent-state.json",
   endpoint: process.env.LLM_BASE_URL,
   apiKey: process.env.LLM_API_KEY,
   model: process.env.LLM_MODEL,
   publish: process.argv.includes("--publish")
 };
+
+function signMessage(room, nonce, text) {
+  if (!config.agentDid.startsWith("did:key:z6Mk") || !config.privateKey) throw new Error("AGENT_DID and AGENT_PRIVATE_KEY_BASE64 are required for signed publishing");
+  const key = createPrivateKey({ key: Buffer.from(config.privateKey, "base64"), format: "der", type: "pkcs8" });
+  return signBytes(null, Buffer.from(`${room}|${nonce}|${text}`), key).toString("base64url");
+}
+
+async function publishSigned(text) {
+  const nonce = Date.now();
+  const signature = signMessage(config.room, nonce, text);
+  const response = await fetch(`${config.baseUrl}/r/${encodeURIComponent(config.room)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ did: config.agentDid, sig: signature, nonce: String(nonce), text })
+  });
+  if (!response.ok) throw new Error(`Technocore publish failed: ${response.status}`);
+  const result = await response.json();
+  if (!result?.seq) throw new Error("Technocore did not return an accepted sequence");
+  return result;
+}
 
 async function loadState() {
   try { return JSON.parse(await readFile(config.stateFile, "utf8")); }
@@ -55,7 +77,11 @@ async function runOnce() {
         const quality = validateReply(reply, state);
         record.quality = quality.reason;
         record.reply = quality.ok ? quality.text : undefined;
-        if (quality.ok && config.publish) record.publish = "blocked: signed publisher not configured";
+        if (quality.ok && config.publish) {
+          const accepted = await publishSigned(quality.text);
+          record.publish = { status: "accepted", seq: accepted.seq };
+          state.lastReplyAt = Date.now();
+        }
         if (quality.ok) state.recentReplies.push({ sourceText: message.text, replyText: quality.text, at: Date.now() });
       } catch (error) { record.action = "defer"; record.reason = error.message; }
     }
