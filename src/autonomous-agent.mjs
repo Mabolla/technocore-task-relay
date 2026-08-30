@@ -37,7 +37,7 @@ async function publishSigned(text) {
 
 async function loadState() {
   try { return JSON.parse(await readFile(config.stateFile, "utf8")); }
-  catch { return { cursor: 0, lastReplyAt: 0, recentReplies: [], decisions: [] }; }
+  catch { return { cursor: 0, initialized: false, lastReplyAt: 0, recentReplies: [], decisions: [] }; }
 }
 
 async function saveState(state) {
@@ -67,6 +67,14 @@ async function runOnce() {
   const state = await loadState();
   const payload = await readRoom(state.cursor);
   const messages = payload.messages || [];
+  if (!state.initialized) {
+    state.cursor = messages.reduce((latest, message) => Math.max(latest, Number(message.seq) || 0), 0);
+    state.initialized = true;
+    state.decisions.push({ at: new Date().toISOString(), action: "bootstrap", reason: "existing-history-skipped", cursor: state.cursor });
+    await saveState(state);
+    console.log(JSON.stringify(state.decisions.at(-1)));
+    return;
+  }
   for (const message of messages) {
     state.cursor = Math.max(state.cursor, Number(message.seq) || 0);
     const verdict = decide(message, state, { agentName: config.agentName, agentDid: config.agentDid });
