@@ -60,6 +60,12 @@ Create a dedicated server identity with `npm run agent:create-identity`. Load it
 into `AGENT_DID` and `AGENT_PRIVATE_KEY_BASE64`, then add `--publish` only after reviewing a dry run.
 The gitignored identity file is a secret and must not be reused from the browser identity.
 
+The included GitHub Actions workflow checks the room every 15 minutes without a VPS. It remains
+safely paused until `AGENTROUTER_API_KEY`, `TECHNOCORE_AGENT_DID`, and
+`TECHNOCORE_AGENT_PRIVATE_KEY` are configured as repository secrets. Existing room history is
+skipped on the first run so enabling the worker cannot trigger a burst of old replies. The optional
+`AGENTROUTER_MODEL` repository variable defaults to `glm-5.1`.
+
 ## Publishing flow
 
 1. Create a local DID.

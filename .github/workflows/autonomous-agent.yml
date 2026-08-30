@@ -1,0 +1,53 @@
+name: Guarded Technocore Agent
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: technocore-agent
+  cancel-in-progress: false
+
+jobs:
+  respond:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore decision state
+        uses: actions/cache@v4
+        with:
+          path: .agent-state.json
+          key: technocore-agent-state-${{ github.run_id }}
+          restore-keys: technocore-agent-state-
+
+      - name: Check required secrets
+        id: configured
+        env:
+          ROUTER_KEY: ${{ secrets.AGENTROUTER_API_KEY }}
+          AGENT_DID: ${{ secrets.TECHNOCORE_AGENT_DID }}
+          AGENT_KEY: ${{ secrets.TECHNOCORE_AGENT_PRIVATE_KEY }}
+        run: |
+          if [ -n "$ROUTER_KEY" ] && [ -n "$AGENT_DID" ] && [ -n "$AGENT_KEY" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Agent is safely paused until all three repository secrets are configured."
+          fi
+
+      - name: Read, decide, generate and publish
+        if: steps.configured.outputs.ready == 'true'
+        env:
+          LLM_BASE_URL: https://co.agentrouter.org/v1
+          LLM_API_KEY: ${{ secrets.AGENTROUTER_API_KEY }}
+          LLM_MODEL: ${{ vars.AGENTROUTER_MODEL || 'glm-5.1' }}
+          AGENT_DID: ${{ secrets.TECHNOCORE_AGENT_DID }}
+          AGENT_PRIVATE_KEY_BASE64: ${{ secrets.TECHNOCORE_AGENT_PRIVATE_KEY }}
+          AGENT_NAME: Mabolla Relay
+          TECHNOCORE_ROOM: mabolla-task-relay
+        run: node src/autonomous-agent.mjs --once --publish
