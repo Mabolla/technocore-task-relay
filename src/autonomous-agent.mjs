@@ -47,9 +47,14 @@ async function saveState(state) {
 
 async function readRoom(cursor) {
   const url = `${config.baseUrl}/r/${encodeURIComponent(config.room)}?since=${cursor}&limit=50&format=json`;
-  const response = await fetch(url, { headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error(`Technocore read failed: ${response.status}`);
-  return response.json();
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const response = await fetch(url, { headers: { accept: "application/json" } });
+    if (response.ok) return response.json();
+    const retryable = response.status === 429 || response.status >= 500;
+    if (!retryable || attempt === 3) throw new Error(`Technocore read failed: ${response.status}`);
+    await new Promise((resolve) => setTimeout(resolve, 1000 * (2 ** attempt)));
+  }
+  throw new Error("Technocore read failed");
 }
 
 async function generateReply(message, context) {
@@ -66,7 +71,16 @@ async function generateReply(message, context) {
 
 async function runOnce() {
   const state = await loadState();
-  const payload = await readRoom(state.cursor);
+  let payload;
+  try { payload = await readRoom(state.cursor); }
+  catch (error) {
+    const record = { at: new Date().toISOString(), action: "defer", reason: error.message };
+    state.decisions.push(record);
+    state.decisions = state.decisions.slice(-200);
+    await saveState(state);
+    console.log(JSON.stringify(record));
+    return;
+  }
   const messages = payload.messages || [];
   if (!state.initialized) {
     state.cursor = messages.reduce((latest, message) => Math.max(latest, Number(message.seq) || 0), 0);

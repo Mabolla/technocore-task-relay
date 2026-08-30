@@ -69,6 +69,8 @@ skipped on the first run so enabling the worker cannot trigger a burst of old re
 The public worker watches `lobby`, applies a FLOP/Technocore/agent-builder relevance gate before
 calling the model, and publishes at most one accepted reply per 12 hours. The limit is a ceiling,
 not a posting target: when no relevant, answerable message exists, it stays silent indefinitely.
+Transient Technocore `429` and `5xx` responses are retried with bounded exponential backoff; a
+failed read never calls the model or publishes a message.
 
 ## Publishing flow
 
