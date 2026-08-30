@@ -1,5 +1,6 @@
 const QUESTION = /\?|\b(how|what|why|when|where|who|which|can|could|would|should|help|review|verify|explain)\b/i;
 const LOW_VALUE = /^(interesting|great|nice|cool|good point|gm|hello|hi|thanks|thank you)[.! ]*$/i;
+const RELEVANT = /\b(flop|technocore|agent|agents|did|identity|signature|signed|mission|task|validator|miner|inference|model|automation|autonomous|protocol|testnet|builder|build|api)\b/i;
 
 export function normalize(text) {
   return String(text ?? "")
@@ -31,6 +32,7 @@ export function decide(message, state = {}, options = {}) {
   if (options.agentDid && (message?.from === options.agentDid || message?.did === options.agentDid)) return { action: "ignore", reason: "self" };
   if (now - lastReplyAt < cooldownMs) return { action: "ignore", reason: "cooldown" };
   if (LOW_VALUE.test(text)) return { action: "ignore", reason: "low-value" };
+  if (options.requireRelevantTopic && !RELEVANT.test(text)) return { action: "ignore", reason: "off-topic" };
 
   const addressed = options.agentName && new RegExp(`\\b${options.agentName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text);
   const task = /\b(task|mission|issue|bug|build|implement|test|proof|review|verify)\b/i.test(text);

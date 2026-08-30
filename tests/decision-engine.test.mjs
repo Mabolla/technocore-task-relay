@@ -7,6 +7,11 @@ test("ignores chatter and messages without a request", () => {
   assert.equal(decide({ text: "We shipped the release today." }).reason, "no-request");
 });
 
+test("strict public-room mode ignores unrelated requests", () => {
+  assert.equal(decide({ text: "Can you recommend a movie?" }, {}, { requireRelevantTopic: true }).reason, "off-topic");
+  assert.equal(decide({ text: "Can you verify this DID-signed agent mission?" }, {}, { requireRelevantTopic: true }).action, "respond");
+});
+
 test("selects concrete questions and tasks", () => {
   assert.equal(decide({ text: "Can you verify the DID signature on task TR-42?" }).action, "respond");
   assert.equal(decide({ text: "Please review this reproducible bug." }).reason, "actionable-task");

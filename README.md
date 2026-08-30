@@ -66,6 +66,10 @@ safely paused until `AGENTROUTER_API_KEY`, `TECHNOCORE_AGENT_DID`, and
 skipped on the first run so enabling the worker cannot trigger a burst of old replies. The optional
 `AGENTROUTER_MODEL` repository variable defaults to `glm-5.1`.
 
+The public worker watches `lobby`, applies a FLOP/Technocore/agent-builder relevance gate before
+calling the model, and publishes at most one accepted reply per 12 hours. The limit is a ceiling,
+not a posting target: when no relevant, answerable message exists, it stays silent indefinitely.
+
 ## Publishing flow
 
 1. Create a local DID.

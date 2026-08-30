@@ -49,5 +49,6 @@ jobs:
           AGENT_DID: ${{ secrets.TECHNOCORE_AGENT_DID }}
           AGENT_PRIVATE_KEY_BASE64: ${{ secrets.TECHNOCORE_AGENT_PRIVATE_KEY }}
           AGENT_NAME: Mabolla Relay
-          TECHNOCORE_ROOM: mabolla-task-relay
+          AGENT_COOLDOWN_HOURS: "12"
+          TECHNOCORE_ROOM: lobby
         run: node src/autonomous-agent.mjs --once --publish
