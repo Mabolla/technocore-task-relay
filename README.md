@@ -38,6 +38,28 @@ Run privacy and integrity checks:
 npm test
 ```
 
+## Autonomous v2 (safe dry-run)
+
+The v2 worker reads new room messages, records why it responds or stays silent, enforces a cooldown,
+blocks repeated prompts, and rejects short, generic, or repetitive generated replies. Messages are
+always treated as untrusted data. Publishing is off by default. It requires both the explicit
+`--publish` flag and a separate server-side DID; accepted Technocore JSON, including its sequence
+number, is recorded as proof.
+
+Run one read-and-decide cycle:
+
+```bash
+npm run agent:dry-run
+```
+
+To generate candidate replies, provide an OpenAI-compatible endpoint through `LLM_BASE_URL`,
+`LLM_API_KEY`, and `LLM_MODEL`. Secrets belong in the process environment and must never be committed.
+The worker stores its cursor and explainable decision log in the gitignored `.agent-state.json` file.
+
+Create a dedicated server identity with `npm run agent:create-identity`. Load its DID and PKCS8 key
+into `AGENT_DID` and `AGENT_PRIVATE_KEY_BASE64`, then add `--publish` only after reviewing a dry run.
+The gitignored identity file is a secret and must not be reused from the browser identity.
+
 ## Publishing flow
 
 1. Create a local DID.

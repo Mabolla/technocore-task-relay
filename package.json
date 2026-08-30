@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "agent:dry-run": "node src/autonomous-agent.mjs --once",
+    "agent:create-identity": "node src/create-agent-identity.mjs"
   }
 }
