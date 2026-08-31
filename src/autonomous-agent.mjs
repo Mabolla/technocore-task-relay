@@ -65,7 +65,9 @@ async function generateReply(message, context) {
     headers: { authorization: `Bearer ${config.apiKey}`, "content-type": "application/json" },
     body: JSON.stringify({ model: config.model, temperature: 0.2, messages: [{ role: "system", content: instruction }, { role: "user", content: JSON.stringify({ recentRoomContext: context, messageToAnswer: message.text }) }] })
   });
+  const contentType = response.headers.get("content-type") || "";
   if (!response.ok) throw new Error(`LLM request failed: ${response.status}`);
+  if (!contentType.includes("application/json")) throw new Error(`LLM returned non-JSON content: ${contentType || "unknown"}`);
   return normalize((await response.json()).choices?.[0]?.message?.content);
 }
 
@@ -90,6 +92,7 @@ async function runOnce() {
     console.log(JSON.stringify(state.decisions.at(-1)));
     return;
   }
+  let llmFailure;
   for (const message of messages) {
     state.cursor = Math.max(state.cursor, Number(message.seq) || 0);
     const verdict = decide(message, state, { agentName: config.agentName, agentDid: config.agentDid, cooldownMs: config.cooldownMs, requireRelevantTopic: true });
@@ -106,7 +109,11 @@ async function runOnce() {
           state.lastReplyAt = Date.now();
         }
         if (quality.ok) state.recentReplies.push({ sourceText: message.text, replyText: quality.text, at: Date.now() });
-      } catch (error) { record.action = "defer"; record.reason = error.message; }
+      } catch (error) {
+        record.action = "defer";
+        record.reason = error.message;
+        llmFailure ||= error;
+      }
     }
     state.decisions.push(record);
     console.log(JSON.stringify(record));
@@ -114,6 +121,7 @@ async function runOnce() {
   state.recentReplies = state.recentReplies.slice(-20);
   state.decisions = state.decisions.slice(-200);
   await saveState(state);
+  if (llmFailure) throw llmFailure;
 }
 
 runOnce().catch((error) => { console.error(error.message); process.exitCode = 1; });
