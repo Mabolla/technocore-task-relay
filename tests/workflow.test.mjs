@@ -8,7 +8,8 @@ test("scheduled agent is guarded by secrets and serialized", () => {
   assert.match(workflow, /cron: "\*\/15 \* \* \* \*"/);
   assert.match(workflow, /cancel-in-progress: false/);
   assert.match(workflow, /steps\.configured\.outputs\.ready == 'true'/);
-  assert.match(workflow, /secrets\.AGENTROUTER_API_KEY/);\n  assert.match(workflow, /LLM_BASE_URL: https:\\/\\/agentrouter\\.org\\/v1/);\n  assert.doesNotMatch(workflow, /co\\.agentrouter\\.org/);
+  assert.match(workflow, /secrets\.AGENTROUTER_API_KEY/);
+  assert.match(workflow, /LLM_BASE_URL: https:\/\/co\.agentrouter\.org\/v1/);
   assert.match(workflow, /secrets\.TECHNOCORE_AGENT_DID/);
   assert.match(workflow, /secrets\.TECHNOCORE_AGENT_PRIVATE_KEY/);
   assert.match(workflow, /AGENT_COOLDOWN_HOURS: "12"/);

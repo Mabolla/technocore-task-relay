@@ -43,7 +43,7 @@ jobs:
       - name: Read, decide, generate and publish
         if: steps.configured.outputs.ready == 'true'
         env:
-          LLM_BASE_URL: https://agentrouter.org/v1
+          LLM_BASE_URL: https://co.agentrouter.org/v1
           LLM_API_KEY: ${{ secrets.AGENTROUTER_API_KEY }}
           LLM_MODEL: ${{ vars.AGENTROUTER_MODEL || 'glm-5.1' }}
           AGENT_DID: ${{ secrets.TECHNOCORE_AGENT_DID }}
