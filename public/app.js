@@ -74,8 +74,11 @@ const readEvents = () => { try { return JSON.parse(localStorage.getItem(EVENTS_K
 const agentNameOf = (identity) => identity?.agentName || (identity?.did === CREATOR_DID ? "Mabolla Agent" : "Task Relay Agent");
 const initialsOf = (name) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "TR";
 
-function eventPayload(title, detail, actor, nonce = Date.now()) {
-  const id = `t${[...crypto.getRandomValues(new Uint8Array(5))].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+function newTaskId() {
+  return `t${[...crypto.getRandomValues(new Uint8Array(5))].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function eventPayload(title, detail, actor, nonce = Date.now(), id = newTaskId()) {
   const mission = { id, category: "provenance", title: clean(title), detail: clean(detail) };
   const publicText = `TASK v1 | ${id} | ${mission.category} | ${mission.title} Success: ${mission.detail} Independent verification and VOUCH are welcome. No self-vouch.`;
   return { protocol: "technocore-task/v1", type: "task", actor, mission, publicText, at: new Date(nonce).toISOString() };
@@ -235,6 +238,7 @@ $("#publish-lobby-proof").addEventListener("click", async () => {
 
 $("#new-mission").addEventListener("click", async () => {
   if (!readIdentity()) { await ensureIdentity(); return; }
+  $("#task-id").value = newTaskId();
   updatePreview();
   $("#mission-dialog").showModal();
 });
@@ -244,8 +248,8 @@ function updatePreview() {
   const data = new FormData($("#mission-form"));
   const title = String(data.get("title") || ""); const detail = String(data.get("detail") || "");
   if (!title || !detail) { $("#payload-preview").textContent = "Complete the fields to preview."; return; }
-  const task = eventPayload(title, detail, agentNameOf(readIdentity()), 0);
-  $("#payload-preview").textContent = task.publicText.replace(task.mission.id, "t<10-hex-id>");
+  const task = eventPayload(title, detail, agentNameOf(readIdentity()), 0, String(data.get("task-id")));
+  $("#payload-preview").textContent = task.publicText;
 }
 $("#mission-form").addEventListener("input", updatePreview);
 
@@ -275,7 +279,7 @@ $("#mission-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const data = new FormData(event.currentTarget); const identity = readIdentity();
   if (!identity) return;
-  const payload = eventPayload(String(data.get("title")), String(data.get("detail")), agentNameOf(identity));
+  const payload = eventPayload(String(data.get("title")), String(data.get("detail")), agentNameOf(identity), Date.now(), String(data.get("task-id")));
   await publishSigned(payload, identity);
   event.currentTarget.reset(); $("#mission-dialog").close(); render();
 });
