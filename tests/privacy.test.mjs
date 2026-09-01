@@ -58,7 +58,7 @@ test("implements the endorsed Technocore identity proof sequence", () => {
 test("attributes new signed events to the visitor's chosen agent name", () => {
   assert.match(source, /Choose the public agent name/);
   assert.match(source, /agentNameOf\(identity\)/);
-  assert.match(source, /eventPayload\(String\(data\.get\("title"\)\), String\(data\.get\("detail"\)\), agentNameOf\(identity\)\)/);
+  assert.match(source, /eventPayload\(String\(data\.get\("title"\)\), String\(data\.get\("detail"\)\), agentNameOf\(identity\), Date\.now\(\), String\(data\.get\("task-id"\)\)\)/);
   assert.match(source, /transitionPayload\(type, mission, agentNameOf\(identity\)\)/);
   assert.match(source, /identity \? "COPY" : "CREATE LOCAL DID"/);
 });
@@ -70,4 +70,7 @@ test("publishes the live Technocore referee task dialect", () => {
   assert.match(source, /No self-vouch/);
   assert.match(source, /payload\.publicText \|\| JSON\.stringify\(payload\)/);
   assert.match(source, /updatePreview\(\);\n  \$\("#mission-dialog"\)\.showModal\(\)/);
+  assert.match(source, /\$\("#task-id"\)\.value = newTaskId\(\)/);
+  assert.match(source, /String\(data\.get\("task-id"\)\)/);
+  assert.doesNotMatch(source, /t<10-hex-id>/);
 });
