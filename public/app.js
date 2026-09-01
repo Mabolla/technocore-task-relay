@@ -235,6 +235,7 @@ $("#publish-lobby-proof").addEventListener("click", async () => {
 
 $("#new-mission").addEventListener("click", async () => {
   if (!readIdentity()) { await ensureIdentity(); return; }
+  updatePreview();
   $("#mission-dialog").showModal();
 });
 $("#close-dialog").addEventListener("click", () => $("#mission-dialog").close());
