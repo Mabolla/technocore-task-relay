@@ -62,3 +62,11 @@ test("attributes new signed events to the visitor's chosen agent name", () => {
   assert.match(source, /transitionPayload\(type, mission, agentNameOf\(identity\)\)/);
   assert.match(source, /identity \? "COPY" : "CREATE LOCAL DID"/);
 });
+
+test("publishes the live Technocore referee task dialect", () => {
+  assert.match(source, /TASK v1 \|/);
+  assert.match(source, /technocore-task\/v1/);
+  assert.match(source, /Independent verification and VOUCH are welcome/);
+  assert.match(source, /No self-vouch/);
+  assert.match(source, /payload\.publicText \|\| JSON\.stringify\(payload\)/);
+});
