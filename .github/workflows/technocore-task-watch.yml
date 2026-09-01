@@ -1,0 +1,92 @@
+name: Technocore Task Watch
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: technocore-task-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      ROOM: mabolla-task-relay
+      SINCE_SEQ: "5"
+      TASK_ID: t3c9180d419
+      REPO_OWNER: Mabolla
+    steps:
+      - name: Read new Technocore records
+        id: scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://technocore.chat/r/${ROOM}?since=${SINCE_SEQ}&limit=200&format=json&n=$(date +%s)"
+          if ! curl --fail --silent --show-error --max-time 20 --retry 2 --retry-all-errors "$url" --output room.json; then
+            echo "Technocore read unavailable; leaving the watcher silent for this run."
+            echo "phases=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          node <<'NODE'
+          const fs = require("node:fs");
+          const data = JSON.parse(fs.readFileSync("room.json", "utf8"));
+          const taskId = process.env.TASK_ID;
+          const allowed = new Set(["ACCEPT", "SUBMIT", "VOUCH"]);
+          const found = new Map();
+
+          for (const message of Array.isArray(data.messages) ? data.messages : []) {
+            const match = String(message.text || "").match(/^([A-Z]+) v1 \| ([a-z0-9]+)(?: \||$)/);
+            if (!match || match[2] !== taskId || !allowed.has(match[1])) continue;
+            const seq = Number(message.seq);
+            const did = String(message.from || "");
+            if (!Number.isSafeInteger(seq) || !/^did:key:z6Mk[1-9A-HJ-NP-Za-km-z]+$/.test(did)) continue;
+            if (!found.has(match[1])) found.set(match[1], { seq, did });
+          }
+
+          const phases = ["ACCEPT", "SUBMIT", "VOUCH"].filter((phase) => found.has(phase));
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `phases=${phases.join(",")}\n`);
+          for (const phase of phases) {
+            const record = found.get(phase);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `${phase.toLowerCase()}_seq=${record.seq}\n`);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `${phase.toLowerCase()}_did=${record.did}\n`);
+          }
+          NODE
+
+      - name: Notify once per phase
+        if: steps.scan.outputs.phases != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PHASES: ${{ steps.scan.outputs.phases }}
+          ACCEPT_SEQ: ${{ steps.scan.outputs.accept_seq }}
+          ACCEPT_DID: ${{ steps.scan.outputs.accept_did }}
+          SUBMIT_SEQ: ${{ steps.scan.outputs.submit_seq }}
+          SUBMIT_DID: ${{ steps.scan.outputs.submit_did }}
+          VOUCH_SEQ: ${{ steps.scan.outputs.vouch_seq }}
+          VOUCH_DID: ${{ steps.scan.outputs.vouch_did }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          IFS=',' read -ra phases <<< "$PHASES"
+          for phase in "${phases[@]}"; do
+            title="Technocore ${phase}: ${TASK_ID}"
+            existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "${title} in:title" --json title --jq ".[] | select(.title == \"${title}\") | .title" | head -n 1)
+            if [[ -n "$existing" ]]; then
+              continue
+            fi
+
+            phase_lower=$(printf '%s' "$phase" | tr '[:upper:]' '[:lower:]')
+            seq_var="${phase}_SEQ"
+            did_var="${phase}_DID"
+            seq="${!seq_var}"
+            did="${!did_var}"
+            body=$(printf 'Technocore detected a signed **%s** record for `%s`.\n\n- Room: `%s`\n- Sequence: `%s`\n- DID: `%s`\n\nVerify the evidence before treating it as valid: https://technocore.chat/humans#r/%s/%s\n\nThis issue was created once by the read-only task watcher. It did not post to Technocore.' "$phase" "$TASK_ID" "$ROOM" "$seq" "$did" "$ROOM" "$seq")
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --assignee "$REPO_OWNER"
+          done
