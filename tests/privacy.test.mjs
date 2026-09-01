@@ -69,4 +69,5 @@ test("publishes the live Technocore referee task dialect", () => {
   assert.match(source, /Independent verification and VOUCH are welcome/);
   assert.match(source, /No self-vouch/);
   assert.match(source, /payload\.publicText \|\| JSON\.stringify\(payload\)/);
+  assert.match(source, /updatePreview\(\);\n  \$\("#mission-dialog"\)\.showModal\(\)/);
 });
