@@ -51,6 +51,7 @@
 
   <dialog id="mission-dialog">
     <form id="mission-form" method="dialog">
+      <input id="task-id" name="task-id" type="hidden">
       <header><div><p class="eyebrow">NEW SIGNED EVENT</p><h2>Create mission</h2></div><button type="button" id="close-dialog" aria-label="Close">×</button></header>
       <label>Concrete test<input name="title" maxlength="140" value="Verify retained signatures across the Technocore storage change in mabolla-task-relay." required></label>
       <label>Measurable success criteria<textarea name="detail" maxlength="420" required>Export the room; report whether pre-change seq 1, 3, and 4 contain sig; verify this new TASK's Ed25519 signature offline against &lt;room&gt;|&lt;nonce&gt;|&lt;text&gt;; and publish the exact new seq, verification result, and export SHA-256. VOUCH only after an independent rerun.</textarea></label>
