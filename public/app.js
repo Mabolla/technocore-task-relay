@@ -75,7 +75,10 @@ const agentNameOf = (identity) => identity?.agentName || (identity?.did === CREA
 const initialsOf = (name) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "TR";
 
 function eventPayload(title, detail, actor, nonce = Date.now()) {
-  return { protocol: "task-relay/v1", type: "created", actor, mission: { id: `TR-${nonce}`, title: clean(title), detail: clean(detail) }, at: new Date(nonce).toISOString() };
+  const id = `t${[...crypto.getRandomValues(new Uint8Array(5))].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+  const mission = { id, category: "provenance", title: clean(title), detail: clean(detail) };
+  const publicText = `TASK v1 | ${id} | ${mission.category} | ${mission.title} Success: ${mission.detail} Independent verification and VOUCH are welcome. No self-vouch.`;
+  return { protocol: "technocore-task/v1", type: "task", actor, mission, publicText, at: new Date(nonce).toISOString() };
 }
 
 function transitionPayload(type, mission, actor, nonce = Date.now()) {
@@ -129,7 +132,7 @@ function render() {
   $("#new-mission").textContent = identity ? "+ NEW MISSION" : "CREATE LOCAL DID";
 
   const events = allEvents();
-  const createdEvents = events.filter((event) => event.type === "created");
+  const createdEvents = events.filter((event) => event.type === "created" || event.type === "task");
   const lanes = { open: [], claimed: [], completed: [] };
   for (const created of createdEvents) {
     const claims = events.filter((event) => event.type === "claimed" && event.mission.id === created.mission.id);
@@ -239,12 +242,14 @@ $("#close-dialog").addEventListener("click", () => $("#mission-dialog").close())
 function updatePreview() {
   const data = new FormData($("#mission-form"));
   const title = String(data.get("title") || ""); const detail = String(data.get("detail") || "");
-  $("#payload-preview").textContent = title && detail ? JSON.stringify(eventPayload(title, detail, agentNameOf(readIdentity()), 0), null, 2).replace("1970-01-01T00:00:00.000Z", "<publish time>").replace("TR-0", "TR-<timestamp>") : "Complete the fields to preview.";
+  if (!title || !detail) { $("#payload-preview").textContent = "Complete the fields to preview."; return; }
+  const task = eventPayload(title, detail, agentNameOf(readIdentity()), 0);
+  $("#payload-preview").textContent = task.publicText.replace(task.mission.id, "t<10-hex-id>");
 }
 $("#mission-form").addEventListener("input", updatePreview);
 
 async function publishSigned(payload, identity) {
-  const text = JSON.stringify(payload); const nonce = Date.parse(payload.at);
+  const text = payload.publicText || JSON.stringify(payload); const nonce = Date.parse(payload.at);
   notice("Signing locally…");
   const signature = await sign(identity, ROOM, nonce, text);
   const signedEvent = { ...payload, did: identity.did, signature, delivery: "pending" };
