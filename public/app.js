@@ -1,8 +1,10 @@
-import { auditTranscript, encodeFrame, makePaperOffer } from "./tclk.js";
+import { auditTranscript } from "./tclk.js";
+import { OFFER_ROOM, encodeFrame, findValidAccept, makeLivePaperOffer, makePaperLock } from "./tclk-official.js";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
 const EVENTS_KEY = "mabolla.task-relay.events.v1";
+const TCLK_OFFER_KEY = "mabolla.task-relay.tclk-offer.v1";
 const CREATOR_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const NETWORK_PROOF = [{
@@ -290,10 +292,38 @@ $("#prepare-tclk").addEventListener("click", async () => {
   const identity = readIdentity();
   if (!identity) { notice("Restore the existing DID before preparing a tclk offer"); return; }
   try {
-    const offer = await makePaperOffer({ from: identity.did, jobId: clean($("#tclk-task-id").value) });
+    const offer = makeLivePaperOffer({ from: identity.did, jobId: clean($("#tclk-task-id").value) });
     $("#tclk-preview").textContent = encodeFrame(offer);
-    notice("Paper offer prepared locally — nothing was published");
+    localStorage.setItem(TCLK_OFFER_KEY, JSON.stringify(offer));
+    $("#publish-tclk").disabled = false; $("#check-tclk").disabled = false;
+    $("#tclk-live-result").textContent = `Offer ${offer.id}\nPrepared locally; not published yet.`;
+    notice("Official tclk offer prepared; review it before publishing");
   } catch (error) { notice(error.message); }
+});
+
+$("#publish-tclk").addEventListener("click", async () => {
+  const identity = readIdentity(); const offer = JSON.parse(localStorage.getItem(TCLK_OFFER_KEY) || "null");
+  if (!identity || !offer) return;
+  const text = encodeFrame(offer); const nonce = Date.now();
+  if (!window.confirm(`Publish this exact signed tclk/1 offer to /r/${OFFER_ROOM}?\n\n${text}\n\nPAPER is a value-free rehearsal.`)) return;
+  const signature = await sign(identity, OFFER_ROOM, nonce, text);
+  window.open(signedUrl(OFFER_ROOM, identity, signature, nonce, text), "_blank", "noopener,noreferrer");
+  $("#tclk-live-result").textContent = `Offer ${offer.id}\nSigned submission opened. Confirm Technocore accepted it, then check for an accept.`;
+  notice("Live tclk offer opened for Technocore confirmation");
+});
+
+$("#check-tclk").addEventListener("click", async () => {
+  const offer = JSON.parse(localStorage.getItem(TCLK_OFFER_KEY) || "null"); if (!offer) return;
+  try {
+    const response = await fetch(`https://technocore.chat/r/${OFFER_ROOM}?format=json`, { headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(`Technocore read failed (${response.status})`);
+    const found = await findValidAccept(await response.json(), offer);
+    if (!found) { $("#tclk-live-result").textContent = `Offer ${offer.id}\nNo protocol-valid independent accept yet.`; return; }
+    const lock = makePaperLock(offer, found.accept, offer.from);
+    localStorage.setItem(`${TCLK_OFFER_KEY}.accept`, JSON.stringify(found.accept));
+    $("#tclk-live-result").textContent = `VALID ACCEPT\nCounterparty: ${found.accept.from}\nContract: ${found.contract}\nDeal room: /r/${found.room}\n\nNext payer frame prepared:\n${lock.line}`;
+    notice("Independent accept validated with the official tclk state machine");
+  } catch (error) { $("#tclk-live-result").textContent = `Check failed: ${error.message}`; }
 });
 
 $("#audit-tclk").addEventListener("click", async () => {
@@ -308,3 +338,4 @@ $("#audit-tclk").addEventListener("click", async () => {
 });
 
 render();
+if (localStorage.getItem(TCLK_OFFER_KEY)) { $("#publish-tclk").disabled = false; $("#check-tclk").disabled = false; }

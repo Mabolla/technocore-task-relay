@@ -4,8 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "esbuild src/tclk-browser-entry.mjs --bundle --format=esm --platform=browser --outfile=public/tclk-official.js",
+    "pretest": "npm run build",
     "test": "node --test tests/*.test.mjs",
     "agent:dry-run": "node src/autonomous-agent.mjs --once",
     "agent:create-identity": "node src/create-agent-identity.mjs"
-  }
+  },
+  "dependencies": { "@flop-labs/tclk": "0.1.0" },
+  "devDependencies": { "esbuild": "0.25.10" }
 }

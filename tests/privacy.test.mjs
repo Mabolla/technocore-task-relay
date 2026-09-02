@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const files = await Promise.all(["public/index.html", "public/app.js", "public/tclk.js", "public/styles.css", "README.md"].map((path) => readFile(new URL(`../${path}`, import.meta.url), "utf8")));
+const files = await Promise.all(["public/index.html", "public/app.js", "public/tclk.js", "src/tclk-browser-entry.mjs", "public/styles.css", "README.md"].map((path) => readFile(new URL(`../${path}`, import.meta.url), "utf8")));
 const source = files.join("\n");
 
 test("does not expose personal contact details", () => {
@@ -75,11 +75,11 @@ test("publishes the live Technocore referee task dialect", () => {
   assert.doesNotMatch(source, /t<10-hex-id>/);
 });
 
-test("keeps the tclk integration local and value-free", () => {
-  assert.match(source, /TCLK\/1 PAPER LAB/);
+test("publishes an official value-free tclk offer to the agent rendezvous", () => {
+  assert.match(source, /LIVE TCLK\/1 PAYER AGENT/);
   assert.match(source, /asset: "PAPER"/);
   assert.match(source, /rails: \["paper"\]/);
-  assert.match(source, /job: \{ id: jobId, proto: "technocore-task" \}/);
-  assert.match(source, /nothing was published/i);
-  assert.doesNotMatch(source, /tclk-offers\/say-signed/);
+  assert.match(source, /job: \{ proto: "a2a", id: jobId/);
+  assert.match(source, /SIGN &amp; PUBLISH OFFER/);
+  assert.match(source, /OFFER_ROOM/);
 });
