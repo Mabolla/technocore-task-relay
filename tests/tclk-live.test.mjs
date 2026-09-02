@@ -62,6 +62,15 @@ test("lists only signed, external, unexpired PAPER jobs", async () => {
   assert.equal(found.length, 1); assert.equal(found[0].offer.id, offer.id);
 });
 
+test("does not list an offer that another DID already accepted", async () => {
+  const now = 1_800_000_000_000; const other = await signer(); const payee = await signer();
+  const offer = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 60_000, claimByMs: now + 3_600_000, refundAfterMs: now + 7_200_000, job: { proto: "a2a", id: "job-taken", context: "/kv/jobs/job-taken" } });
+  const offerRecord = await record(other, OFFER_ROOM, encodeFrame(offer), "1800000000001", new Date(now).toISOString());
+  const accept = makeAccept(offer, { from: payee.did, statement: generateHashLock().hash });
+  const acceptRecord = await record(payee, OFFER_ROOM, encodeFrame(accept), "1800000000002", new Date(now + 1).toISOString());
+  assert.equal((await listSafePaperOffers({ messages: [offerRecord, acceptRecord] }, payer, now)).length, 0);
+});
+
 test("mints a payee secret and folds a signed payer lock", async () => {
   const now = Date.now(); const other = await signer(); const payee = await signer();
   const offer = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 60_000, claimByMs: now + 3_600_000, refundAfterMs: now + 7_200_000, job: { proto: "a2a", id: "job-2", context: "/kv/jobs/job-2" } });

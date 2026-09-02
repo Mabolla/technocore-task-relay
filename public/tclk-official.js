@@ -3229,6 +3229,7 @@ async function listSafePaperOffers(raw, myDid, now = Date.now()) {
     const safeContext = frame.job.context.startsWith("https://technocore.chat/") || /^\/kv\/[a-z0-9][a-z0-9_-]{0,47}\/[a-z0-9][a-z0-9_-]{0,47}$/.test(frame.job.context);
     if (!safeContext) continue;
     if (record.from !== frame.from || !await validTransportSignature(record, OFFER_ROOM)) continue;
+    if (await findValidAccept(raw, frame, now)) continue;
     offers.push({ offer: frame, seq: record.seq, ts: record.ts });
   }
   return offers.sort((a, b) => Number(b.seq) - Number(a.seq));
