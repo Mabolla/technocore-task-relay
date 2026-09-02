@@ -22,7 +22,7 @@ jobs:
       SINCE_SEQ: "5"
       TASK_ID: t3c9180d419
       REPO_OWNER: Mabolla
-      TCLK_OFFER_ID: 0x191a2f5dafade0200a702cc76215d8cdb68679a3615701108a0a4d160db292b7
+      TCLK_OFFER_ID: "0x191a2f5dafade0200a702cc76215d8cdb68679a3615701108a0a4d160db292b7"
       TCLK_OFFER_SEQ: "1100"
     steps:
       - uses: actions/checkout@v4
