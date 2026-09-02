@@ -90,7 +90,7 @@ export async function listSafePaperOffers(raw, myDid, now = Date.now()) {
     const frame = tryDecodeFrame(record.text || "");
     if (frame?.type !== "offer" || frame.from === myDid || frame.role !== "payer") continue;
     if (frame.asset !== "PAPER" || frame.lock !== "hash" || !frame.rails.includes("paper")) continue;
-    if (!frame.job?.id || !frame.job.context || frame.expiresMs <= now + 5 * 60_000 || frame.claimByMs <= now + 10 * 60_000) continue;
+    // Leave enough time for a human to review the evidence, accept, complete the\n    // work, and reveal. Near-expiry offers create rushed, low-quality activity.\n    if (!frame.job?.id || !frame.job.context || frame.expiresMs <= now + 30 * 60_000 || frame.claimByMs <= now + 45 * 60_000) continue;
     const safeContext = frame.job.context.startsWith("https://technocore.chat/") || /^\/kv\/[a-z0-9][a-z0-9_-]{0,47}\/[a-z0-9][a-z0-9_-]{0,47}$/.test(frame.job.context);
     if (!safeContext) continue;
     if (record.from !== frame.from || !(await validTransportSignature(record, OFFER_ROOM))) continue;

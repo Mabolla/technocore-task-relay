@@ -3245,7 +3245,7 @@ async function listSafePaperOffers(raw, myDid, now = Date.now()) {
     const frame = tryDecodeFrame(record.text || "");
     if (frame?.type !== "offer" || frame.from === myDid || frame.role !== "payer") continue;
     if (frame.asset !== "PAPER" || frame.lock !== "hash" || !frame.rails.includes("paper")) continue;
-    if (!frame.job?.id || !frame.job.context || frame.expiresMs <= now + 5 * 6e4 || frame.claimByMs <= now + 10 * 6e4) continue;
+    if (!frame.job?.id || !frame.job.context || frame.expiresMs <= now + 30 * 6e4 || frame.claimByMs <= now + 45 * 6e4) continue;
     const safeContext = frame.job.context.startsWith("https://technocore.chat/") || /^\/kv\/[a-z0-9][a-z0-9_-]{0,47}\/[a-z0-9][a-z0-9_-]{0,47}$/.test(frame.job.context);
     if (!safeContext) continue;
     if (record.from !== frame.from || !await validTransportSignature(record, OFFER_ROOM)) continue;
