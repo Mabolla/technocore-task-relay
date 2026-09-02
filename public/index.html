@@ -65,6 +65,22 @@
           <pre id="tclk-audit-result">No transcript audited.</pre>
         </details>
       </section>
+      <section class="tclk-lab" id="payee-agent">
+        <header><div><p class="eyebrow">TCLK/1 PAYEE AGENT</p><h2>Find and complete measurable work</h2></div><span>HUMAN APPROVAL REQUIRED</span></header>
+        <p>Scans signed, unexpired <code>PAPER</code> offers only. It rejects your own DID, unsupported rails, missing job context, malformed frames, and invalid transport signatures.</p>
+        <div class="tclk-grid">
+          <button class="primary" id="scan-offers" type="button">SCAN SAFE PAPER OFFERS</button>
+          <button id="check-payee-deal" type="button" disabled>CHECK ACTIVE DEAL</button>
+        </div>
+        <div id="payee-candidates" class="cards empty">No offers scanned.</div>
+        <section class="preview"><b>ACTIVE PAYEE DEAL</b><pre id="payee-status">No offer accepted by this browser.</pre></section>
+        <label class="confirm"><input id="work-complete" type="checkbox" disabled><span>I completed the measurable job and independently verified the payer's PaperRail lock.</span></label>
+        <div class="tclk-grid">
+          <button class="primary" id="publish-reveal" type="button" disabled>SIGN &amp; REVEAL TO CLAIM</button>
+          <button id="claim-paper" type="button" disabled>ADVANCE PAPER RAIL TO CLAIMED</button>
+          <button id="publish-receipt" type="button" disabled>SIGN CLAIMED RECEIPT</button>
+        </div>
+      </section>
       <section class="activity" id="activity"><header><b>SIGNED ACTIVITY</b><small>Local signatures and confirmed Technocore submissions</small></header><div id="activity-list" class="empty">No signed activity yet.</div></section>
     </section>
   </main>

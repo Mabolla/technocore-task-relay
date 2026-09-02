@@ -2876,6 +2876,29 @@ function makeOffer(fields) {
   };
   return validateFrame({ ...body, id: offerId(body) });
 }
+function makeAccept(offer, accept) {
+  validateFrame(offer);
+  if (accept.from === offer.from)
+    fail("accept.from must differ from offer.from");
+  if (!isValidStatement(offer.lock, accept.statement)) {
+    fail(`statement does not fit a ${offer.lock} lock: ${accept.statement}`);
+  }
+  if (offer.lock === "point" && accept.paymentKey === void 0) {
+    fail("point locks require the acceptor's paymentKey");
+  }
+  const core = {
+    from: accept.from,
+    ref: offer.id,
+    statement: accept.statement,
+    paymentKey: accept.paymentKey,
+    nonce: accept.nonce ?? u8aToHex(randomU8a(8)).slice(2)
+  };
+  return validateFrame({
+    type: "accept",
+    ...core,
+    contract: contractId(offer, core)
+  });
+}
 function isTclkLine(text) {
   return text.startsWith(TCLK_PREFIX);
 }
@@ -2914,6 +2937,9 @@ function hashLockFromPreimage(preimage) {
     throw new Error(`tclk: hash-lock preimage must be 32 bytes, got ${p.length}`);
   }
   return { preimage: u8aToHex(p), hash: u8aToHex(sha256(p)) };
+}
+function generateHashLock() {
+  return hashLockFromPreimage(randomU8a(32));
 }
 function verifyHashPreimage(hash, preimage) {
   try {
@@ -3065,7 +3091,30 @@ function applyFrame(state, frame, nowMs) {
 }
 
 // node_modules/@flop-labs/tclk/dist/paper-rail.js
+var PAPER_RECORD_PREFIX = "tclkpaper1";
 var CONTRACT_ID = /^0x[0-9a-f]{64}$/;
+function decodePaperRecord(value) {
+  const parts = value.split(" ");
+  if (parts.length < 5 || parts.length > 6)
+    return null;
+  const [prefix, status, lock, statement, refundAfter, secret] = parts;
+  if (prefix !== PAPER_RECORD_PREFIX)
+    return null;
+  if (status !== "locked" && status !== "claimed" && status !== "refunded")
+    return null;
+  if (lock !== "hash" && lock !== "point")
+    return null;
+  if (!/^0x[0-9a-f]{64,66}$/.test(statement))
+    return null;
+  const refundAfterMs = Number(refundAfter);
+  if (!Number.isSafeInteger(refundAfterMs) || refundAfterMs <= 0)
+    return null;
+  if (secret !== void 0 && !/^0x[0-9a-f]{64}$/.test(secret))
+    return null;
+  if (status === "claimed" !== (secret !== void 0))
+    return null;
+  return { status, lock, statement, refundAfterMs, ...secret === void 0 ? {} : { secret } };
+}
 function paperNote(contract) {
   if (!CONTRACT_ID.test(contract))
     throw new Error(`tclk: malformed contract id: ${contract}`);
@@ -3138,13 +3187,13 @@ function base64urlBytes(value) {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
   return Uint8Array.from(atob(normalized + "=".repeat((4 - normalized.length % 4) % 4)), (c) => c.charCodeAt(0));
 }
-async function validTransportSignature(record) {
+async function validTransportSignature(record, room) {
   if (!record.sig || !record.nonce || !record.from?.startsWith("did:key:z")) return false;
   const decoded = base58Decode(record.from.slice("did:key:z".length));
   if (!decoded || decoded.length !== 34 || decoded[0] !== 237 || decoded[1] !== 1) return false;
   try {
     const key = await crypto.subtle.importKey("raw", decoded.slice(2), { name: "Ed25519" }, false, ["verify"]);
-    return crypto.subtle.verify("Ed25519", key, base64urlBytes(record.sig), new TextEncoder().encode(`${OFFER_ROOM}|${record.nonce}|${record.text}`));
+    return crypto.subtle.verify("Ed25519", key, base64urlBytes(record.sig), new TextEncoder().encode(`${room}|${record.nonce}|${record.text}`));
   } catch {
     return false;
   }
@@ -3153,12 +3202,95 @@ async function findValidAccept(raw, offer, now = Date.now()) {
   for (const record of records(raw)) {
     const frame = tryDecodeFrame(record.text || "");
     if (frame?.type !== "accept" || frame.ref !== offer.id || frame.from === offer.from) continue;
-    if (record.from !== frame.from || !await validTransportSignature(record)) continue;
+    if (record.from !== frame.from || !await validTransportSignature(record, OFFER_ROOM)) continue;
     const acceptedAt = Number.isFinite(Date.parse(record.ts)) ? Date.parse(record.ts) : now;
     const step = applyFrame(openContract(offer), frame, acceptedAt);
     if (step.ok) return { accept: frame, contract: frame.contract, room: dealRoom(frame.contract) };
   }
   return null;
+}
+async function verifyAcceptRecord(raw, offer, accept, now = Date.now()) {
+  for (const record of records(raw)) {
+    const frame = tryDecodeFrame(record.text || "");
+    if (frame?.type !== "accept" || frame.contract !== accept.contract || frame.from !== accept.from) continue;
+    if (record.from !== frame.from || !await validTransportSignature(record, OFFER_ROOM)) continue;
+    const at = Number.isFinite(Date.parse(record.ts)) ? Date.parse(record.ts) : now;
+    if (applyFrame(openContract(offer), frame, at).ok) return { seq: record.seq, record, frame };
+  }
+  return null;
+}
+async function listSafePaperOffers(raw, myDid, now = Date.now()) {
+  const offers = [];
+  for (const record of records(raw)) {
+    const frame = tryDecodeFrame(record.text || "");
+    if (frame?.type !== "offer" || frame.from === myDid || frame.role !== "payer") continue;
+    if (frame.asset !== "PAPER" || frame.lock !== "hash" || !frame.rails.includes("paper")) continue;
+    if (!frame.job?.id || !frame.job.context || frame.expiresMs <= now || frame.claimByMs <= now + 30 * 6e4) continue;
+    const safeContext = frame.job.context.startsWith("https://technocore.chat/") || /^\/kv\/[a-z0-9][a-z0-9_-]{0,47}\/[a-z0-9][a-z0-9_-]{0,47}$/.test(frame.job.context);
+    if (!safeContext) continue;
+    if (record.from !== frame.from || !await validTransportSignature(record, OFFER_ROOM)) continue;
+    offers.push({ offer: frame, seq: record.seq, ts: record.ts });
+  }
+  return offers.sort((a, b) => Number(b.seq) - Number(a.seq));
+}
+async function verifyBoundJobSpec(raw, offer) {
+  const clean2 = String(raw).split("\n").filter((line) => !line.startsWith("!!") && line.trim()).join("\n").trim();
+  const match = clean2.match(/^job-spec-v1 sha256=([0-9a-f]{64}) \| (.+)$/s);
+  if (!match || !offer.job?.id.endsWith(match[1])) return null;
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(match[2])));
+  const actual = [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  if (actual !== match[1]) return null;
+  if (!/Deliverable=/i.test(match[2]) || !/settlement=PAPER-only/i.test(match[2])) return null;
+  if (!/Do not (?:execute|request|include)/i.test(match[2]) || !/private keys?/i.test(match[2])) return null;
+  return { hash: actual, text: match[2] };
+}
+function makePayeeAcceptance(offer, from) {
+  if (offer.role !== "payer" || offer.asset !== "PAPER" || offer.lock !== "hash" || !offer.rails.includes("paper")) {
+    throw new Error("Only payer-originated PAPER/hash offers are supported");
+  }
+  const lock = generateHashLock();
+  const accept = makeAccept(offer, { from, statement: lock.hash });
+  return { accept, line: encodeFrame(accept), secret: lock.preimage, contract: accept.contract, room: dealRoom(accept.contract) };
+}
+async function foldPayeeDeal(raw, offer, accept, now = Date.now()) {
+  const accepted = applyFrame(openContract(offer), accept, Math.min(now, offer.expiresMs - 1));
+  if (!accepted.ok) throw new Error(accepted.reason);
+  const room = dealRoom(accept.contract);
+  let state = accepted.state;
+  const applied = [];
+  for (const record of records(raw)) {
+    const frame = tryDecodeFrame(record.text || "");
+    if (!frame || frame.contract !== accept.contract || frame.type === "accept") continue;
+    if (record.from !== frame.from || !await validTransportSignature(record, room)) continue;
+    const at = Number.isFinite(Date.parse(record.ts)) ? Date.parse(record.ts) : now;
+    const step = applyFrame(state, frame, at);
+    if (step.ok) {
+      state = step.state;
+      applied.push({ seq: record.seq, frame });
+    }
+  }
+  return { state, applied, room };
+}
+function expectedPaperLock(offer, accept) {
+  const note = paperNote(accept.contract);
+  return { note, ref: accept.contract, value: `tclkpaper1 locked ${offer.lock} ${accept.statement} ${offer.refundAfterMs}` };
+}
+function expectedPaperClaim(offer, accept, secret) {
+  const lock = expectedPaperLock(offer, accept);
+  return { ...lock, lockedValue: lock.value, value: `tclkpaper1 claimed ${offer.lock} ${accept.statement} ${offer.refundAfterMs} ${secret}` };
+}
+function classifyPaperRecord(raw, offer, accept) {
+  const record = decodePaperRecord(raw);
+  if (!record || record.lock !== offer.lock || record.statement !== accept.statement || record.refundAfterMs !== offer.refundAfterMs) return "invalid";
+  return record.status;
+}
+function makePayeeReveal(accept, from, secret) {
+  const frame = { type: "reveal", from, contract: accept.contract, secret };
+  return { frame, line: encodeFrame(frame), room: dealRoom(accept.contract) };
+}
+function makePayeeReceipt(accept, from) {
+  const frame = { type: "receipt", from, contract: accept.contract, outcome: "claimed", rail: "paper", ref: accept.contract };
+  return { frame, line: encodeFrame(frame), room: dealRoom(accept.contract) };
 }
 function makePaperLock(offer, accept, from) {
   const accepted = applyFrame(openContract(offer), accept, Date.now());
@@ -3177,10 +3309,20 @@ function makePaperLock(offer, accept, from) {
 }
 export {
   OFFER_ROOM,
+  classifyPaperRecord,
   encodeFrame,
+  expectedPaperClaim,
+  expectedPaperLock,
   findValidAccept,
+  foldPayeeDeal,
+  listSafePaperOffers,
   makeLivePaperOffer,
-  makePaperLock
+  makePaperLock,
+  makePayeeAcceptance,
+  makePayeeReceipt,
+  makePayeeReveal,
+  verifyAcceptRecord,
+  verifyBoundJobSpec
 };
 /*! Bundled license information:
 
