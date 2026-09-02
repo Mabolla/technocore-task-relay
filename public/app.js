@@ -1,10 +1,11 @@
 import { auditTranscript } from "./tclk.js";
-import { OFFER_ROOM, classifyPaperRecord, encodeFrame, expectedPaperClaim, expectedPaperLock, findValidAccept, foldPayeeDeal, listSafePaperOffers, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, verifyAcceptRecord, verifyBoundJobSpec } from "./tclk-official.js";
+import { OFFER_ROOM, classifyPaperRecord, encodeFrame, expectedPaperClaim, expectedPaperLock, findValidAccept, foldPayeeDeal, listSafePaperOffers, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makeSimpleVerificationOffer, verifyAcceptRecord, verifyBoundJobSpec } from "./tclk-official.js";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
 const EVENTS_KEY = "mabolla.task-relay.events.v1";
 const TCLK_OFFER_KEY = "mabolla.task-relay.tclk-offer.v1";
+const TCLK_JOB_KEY = "mabolla.task-relay.tclk-job.v1";
 const PAYEE_DEAL_KEY = "mabolla.task-relay.tclk-payee-deal.v1";
 const CREATOR_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -309,13 +310,35 @@ $("#prepare-tclk").addEventListener("click", async () => {
   const identity = readIdentity();
   if (!identity) { notice("Restore the existing DID before preparing a tclk offer"); return; }
   try {
-    const offer = makeLivePaperOffer({ from: identity.did, jobId: clean($("#tclk-task-id").value) });
+    const prepared = await makeSimpleVerificationOffer({ from: identity.did });
+    const { offer } = prepared;
     $("#tclk-preview").textContent = encodeFrame(offer);
     localStorage.setItem(TCLK_OFFER_KEY, JSON.stringify(offer));
-    $("#publish-tclk").disabled = false; $("#check-tclk").disabled = false;
-    $("#tclk-live-result").textContent = `Offer ${offer.id}\nPrepared locally; not published yet.`;
-    notice("Official tclk offer prepared; review it before publishing");
+    localStorage.setItem(TCLK_JOB_KEY, JSON.stringify(prepared));
+    $("#publish-job-spec").disabled = false; $("#verify-job-spec").disabled = false;
+    $("#publish-tclk").disabled = true; $("#check-tclk").disabled = false;
+    $("#tclk-live-result").textContent = `SIMPLE JOB PREPARED\n${prepared.spec}\n\nOffer ${offer.id}\nPublish and verify the job note before publishing the offer.`;
+    notice("Simple hash-bound job prepared; publish its job note first");
   } catch (error) { notice(error.message); }
+});
+
+$("#publish-job-spec").addEventListener("click", () => {
+  const prepared = JSON.parse(localStorage.getItem(TCLK_JOB_KEY) || "null"); if (!prepared) return;
+  if (!window.confirm(`Publish this value-free public job specification?\n\n${prepared.spec}`)) return;
+  window.open(`https://technocore.chat/kv/${prepared.note.ns}/${prepared.note.key}/set/${encodeURIComponent(prepared.spec)}`, "_blank", "noopener,noreferrer");
+  notice("Job note submission opened; verify it before publishing the offer");
+});
+
+$("#verify-job-spec").addEventListener("click", async () => {
+  const prepared = JSON.parse(localStorage.getItem(TCLK_JOB_KEY) || "null"); if (!prepared) return;
+  try {
+    const response = await fetch(`https://technocore.chat/kv/${prepared.note.ns}/${prepared.note.key}?n=${Date.now()}`);
+    if (!response.ok) throw new Error(`Job note read failed (${response.status})`);
+    if (stripNoteBanner(await response.text()) !== prepared.spec) throw new Error("Published job note does not match the prepared hash-bound specification");
+    $("#publish-tclk").disabled = false;
+    $("#tclk-live-result").textContent = `JOB NOTE VERIFIED\n${prepared.spec}\n\nOffer ${prepared.offer.id}\nReady for final review and signing.`;
+    notice("Exact job note verified; offer can now be signed");
+  } catch (error) { $("#tclk-live-result").textContent = `Job verification failed: ${error.message}`; }
 });
 
 $("#publish-tclk").addEventListener("click", async () => {
@@ -515,7 +538,7 @@ $("#audit-tclk").addEventListener("click", async () => {
 });
 
 render();
-if (localStorage.getItem(TCLK_OFFER_KEY)) { $("#publish-tclk").disabled = false; $("#check-tclk").disabled = false; }
+if (localStorage.getItem(TCLK_OFFER_KEY)) { $("#check-tclk").disabled = false; }
 if (readPayeeDeal()) {
   $("#check-payee-deal").disabled = false;
   $("#discard-payee-deal").disabled = readPayeeDeal().state !== "accept-pending";
