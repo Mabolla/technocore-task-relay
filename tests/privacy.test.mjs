@@ -100,3 +100,11 @@ test("only discards a payee deal after confirming its accept is absent", () => {
   assert.match(source, /localStorage\.removeItem\(PAYEE_DEAL_KEY\)/);
   assert.match(source, /The local encrypted secret was preserved/);
 });
+
+test("locks the value-free payer rail before publishing the signed lock frame", () => {
+  assert.match(source, /CREATE PAPER RAIL LOCK/);
+  assert.match(source, /if_absent=1/);
+  assert.match(source, /PaperRail lock does not exactly match the signed contract terms/);
+  assert.match(source, /VERIFY &amp; PUBLISH SIGNED LOCK/);
+  assert.match(source, /sign\(identity, deal\.lock\.room, nonce, deal\.lock\.line\)/);
+});
