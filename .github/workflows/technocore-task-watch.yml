@@ -22,7 +22,15 @@ jobs:
       SINCE_SEQ: "5"
       TASK_ID: t3c9180d419
       REPO_OWNER: Mabolla
+      TCLK_OFFER_ID: 0x191a2f5dafade0200a702cc76215d8cdb68679a3615701108a0a4d160db292b7
+      TCLK_OFFER_SEQ: "1100"
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
       - name: Read new Technocore records
         id: scan
         shell: bash
@@ -90,3 +98,44 @@ jobs:
             body=$(printf 'Technocore detected a signed **%s** record for `%s`.\n\n- Room: `%s`\n- Sequence: `%s`\n- DID: `%s`\n\nVerify the evidence before treating it as valid: https://technocore.chat/humans#r/%s/%s\n\nThis issue was created once by the read-only task watcher. It did not post to Technocore.' "$phase" "$TASK_ID" "$ROOM" "$seq" "$did" "$ROOM" "$seq")
             gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --assignee "$REPO_OWNER"
           done
+
+      - name: Check live tclk offer for a valid accept
+        id: tclk
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://technocore.chat/r/tclk-offers?since=$((TCLK_OFFER_SEQ - 1))&limit=200&format=json&n=$(date +%s)"
+          if ! curl --fail --silent --show-error --max-time 20 --retry 2 --retry-all-errors "$url" --output tclk.json; then
+            echo "Technocore tclk read unavailable; leaving this run silent."
+            exit 0
+          fi
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import { tryDecodeFrame } from "@flop-labs/tclk";
+          import { findValidAccept } from "./src/tclk-browser-entry.mjs";
+
+          const data = JSON.parse(fs.readFileSync("tclk.json", "utf8"));
+          const messages = Array.isArray(data.messages) ? data.messages : [];
+          const offerRecord = messages.find((record) => tryDecodeFrame(String(record.text || ""))?.id === process.env.TCLK_OFFER_ID);
+          if (!offerRecord) process.exit(0);
+          const offer = tryDecodeFrame(offerRecord.text);
+          const found = await findValidAccept(data, offer);
+          if (!found) process.exit(0);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `accepted=true\naccept_did=${found.accept.from}\ncontract=${found.contract}\nroom=${found.room}\n`);
+          NODE
+
+      - name: Notify once for valid tclk accept
+        if: steps.tclk.outputs.accepted == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACCEPT_DID: ${{ steps.tclk.outputs.accept_did }}
+          CONTRACT: ${{ steps.tclk.outputs.contract }}
+          DEAL_ROOM: ${{ steps.tclk.outputs.room }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="tclk ACCEPT: ${TCLK_OFFER_ID}"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "${title} in:title" --json title --jq ".[] | select(.title == \"${title}\") | .title" | head -n 1)
+          [[ -n "$existing" ]] && exit 0
+          body=$(printf 'A different DID posted a transport-signed, protocol-valid **tclk/1 accept** for the live PAPER offer.\n\n- Offer: `%s`\n- Offer sequence: `%s`\n- Counterparty DID: `%s`\n- Contract: `%s`\n- Deal room: `%s`\n\nThe watcher verified the Ed25519 transport signature and folded the accept through the official `@flop-labs/tclk` state machine. It posted nothing to Technocore.' "$TCLK_OFFER_ID" "$TCLK_OFFER_SEQ" "$ACCEPT_DID" "$CONTRACT" "$DEAL_ROOM")
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --assignee "$REPO_OWNER"
