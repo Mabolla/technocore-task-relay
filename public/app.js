@@ -345,6 +345,16 @@ $("#check-tclk").addEventListener("click", async () => {
 
 const readPayeeDeal = () => { try { return JSON.parse(localStorage.getItem(PAYEE_DEAL_KEY)); } catch { return null; } };
 function contextUrl(context) { return context.startsWith("/kv/") ? `https://technocore.chat${context}` : context; }
+function resetPayeeUi() {
+  $("#check-payee-deal").disabled = true;
+  $("#discard-payee-deal").disabled = true;
+  $("#work-complete").checked = false;
+  $("#work-complete").disabled = true;
+  $("#publish-reveal").disabled = true;
+  $("#claim-paper").disabled = true;
+  $("#publish-receipt").disabled = true;
+  $("#payee-status").textContent = "No offer accepted by this browser.";
+}
 
 function renderPayeeOffers(items) {
   const root = $("#payee-candidates"); root.classList.toggle("empty", !items.length);
@@ -390,7 +400,8 @@ async function acceptPaperOffer(offer) {
   const nonce = Date.now(); const signature = await sign(identity, OFFER_ROOM, nonce, prepared.line);
   window.open(signedUrl(OFFER_ROOM, identity, signature, nonce, prepared.line), "_blank", "noopener,noreferrer");
   $("#check-payee-deal").disabled = false;
-  $("#payee-status").textContent = `ACCEPT SUBMISSION OPENED\nContract: ${prepared.contract}\nDeal room: /r/${prepared.room}\nSecret: encrypted in this browser`;
+  $("#discard-payee-deal").disabled = false;
+  $("#payee-status").textContent = `ACCEPT PREPARED LOCALLY — NOT YET VERIFIED ON TECHNOCORE\nContract: ${prepared.contract}\nDeal room: /r/${prepared.room}\nSecret: encrypted in this browser`;
   notice("Accept opened for Technocore confirmation; check the deal after it is accepted");
 }
 
@@ -426,6 +437,33 @@ $("#check-payee-deal").addEventListener("click", async () => {
     $("#payee-status").textContent = `ACCEPT VERIFIED · seq #${accepted.seq}\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.room}\nTranscript state: ${folded.state.status}\nPaperRail state: ${railState}`;
     notice(`Payee deal state: ${folded.state.status}`);
   } catch (error) { $("#payee-status").textContent = `Deal check failed: ${error.message}`; }
+});
+
+$("#discard-payee-deal").addEventListener("click", async () => {
+  const deal = readPayeeDeal();
+  if (!deal || deal.state !== "accept-pending") return;
+  $("#discard-payee-deal").disabled = true;
+  try {
+    const response = await fetch(`https://technocore.chat/r/${OFFER_ROOM}?limit=200&format=json&n=${Date.now()}`);
+    if (!response.ok) throw new Error(`Offer board read failed (${response.status})`);
+    const accepted = await verifyAcceptRecord(await response.json(), deal.offer, deal.accept);
+    if (accepted) {
+      deal.state = "accepted"; deal.acceptSeq = accepted.seq;
+      localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
+      $("#payee-status").textContent = `DISCARD BLOCKED — ACCEPT VERIFIED · seq #${accepted.seq}\nContract: ${deal.accept.contract}\nContinue with CHECK ACTIVE DEAL.`;
+      notice("This accept exists on Technocore and cannot be discarded");
+      return;
+    }
+    if (!window.confirm("No matching accept was found on Technocore. Discard this local pending deal and its encrypted secret? This cannot be undone.")) return;
+    localStorage.removeItem(PAYEE_DEAL_KEY);
+    resetPayeeUi();
+    notice("Unconfirmed local payee deal discarded");
+  } catch (error) {
+    $("#payee-status").textContent = `Discard blocked: ${error.message}\nThe local encrypted secret was preserved.`;
+  } finally {
+    const current = readPayeeDeal();
+    $("#discard-payee-deal").disabled = !current || current.state !== "accept-pending";
+  }
 });
 
 $("#claim-paper").addEventListener("click", async () => {
@@ -478,4 +516,8 @@ $("#audit-tclk").addEventListener("click", async () => {
 
 render();
 if (localStorage.getItem(TCLK_OFFER_KEY)) { $("#publish-tclk").disabled = false; $("#check-tclk").disabled = false; }
-if (readPayeeDeal()) { $("#check-payee-deal").disabled = false; $("#payee-status").textContent = `Active contract: ${readPayeeDeal().accept.contract}\nCheck the deal state to continue.`; }
+if (readPayeeDeal()) {
+  $("#check-payee-deal").disabled = false;
+  $("#discard-payee-deal").disabled = readPayeeDeal().state !== "accept-pending";
+  $("#payee-status").textContent = `${readPayeeDeal().state === "accept-pending" ? "ACCEPT PREPARED LOCALLY — NOT YET VERIFIED ON TECHNOCORE" : "ACTIVE VERIFIED DEAL"}\nContract: ${readPayeeDeal().accept.contract}\nCheck the deal state to continue.`;
+}
