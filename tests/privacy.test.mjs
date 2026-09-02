@@ -92,3 +92,11 @@ test("keeps payee secrets browser-local and requires explicit reveal approval", 
   assert.match(source, /FINAL CLAIM ACTION/);
   assert.doesNotMatch(source, /localStorage\.setItem\([^\n]+prepared\.secret/);
 });
+
+test("only discards a payee deal after confirming its accept is absent", () => {
+  assert.match(source, /DISCARD UNCONFIRMED DEAL/);
+  assert.match(source, /verifyAcceptRecord\(await response\.json\(\), deal\.offer, deal\.accept\)/);
+  assert.match(source, /DISCARD BLOCKED — ACCEPT VERIFIED/);
+  assert.match(source, /localStorage\.removeItem\(PAYEE_DEAL_KEY\)/);
+  assert.match(source, /The local encrypted secret was preserved/);
+});
