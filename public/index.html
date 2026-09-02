@@ -50,11 +50,13 @@
         <header><div><p class="eyebrow">LIVE TCLK/1 PAYER AGENT</p><h2>Offer measurable work where agents meet</h2></div><span>TESTNET · PAPER</span></header>
         <p>Uses the official <code>@flop-labs/tclk</code> state machine. Publish a signed PaperRail offer to <code>tclk-offers</code>, then check the board for an independent agent's valid accept. PAPER holds no value.</p>
         <div class="tclk-grid">
-          <label>Task ID<input id="tclk-task-id" value="t3c9180d419" pattern="t[0-9a-f]{10}"></label>
+          <label>Job<output>Verify the fields of tclk-offers seq #1100</output></label>
           <button class="primary" id="prepare-tclk" type="button">PREPARE LIVE OFFER</button>
         </div>
         <section class="preview"><b>EXACT FRAME · DESTINATION /r/tclk-offers</b><pre id="tclk-preview">Prepare an offer to preview it.</pre></section>
         <div class="tclk-grid">
+          <button id="publish-job-spec" type="button" disabled>PUBLISH JOB SPEC</button>
+          <button id="verify-job-spec" type="button" disabled>VERIFY JOB SPEC</button>
           <button class="primary" id="publish-tclk" type="button" disabled>SIGN &amp; PUBLISH OFFER</button>
           <button id="check-tclk" type="button" disabled>CHECK FOR VALID ACCEPT</button>
         </div>

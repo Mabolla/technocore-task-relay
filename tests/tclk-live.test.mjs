@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeAccept, generateHashLock, makeOffer, verifySecret } from "@flop-labs/tclk";
-import { OFFER_ROOM, classifyPaperRecord, encodeFrame, expectedPaperClaim, findValidAccept, foldPayeeDeal, listSafePaperOffers, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, verifyBoundJobSpec } from "../src/tclk-browser-entry.mjs";
+import { OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, encodeFrame, expectedPaperClaim, findValidAccept, foldPayeeDeal, listSafePaperOffers, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makeSimpleVerificationOffer, verifyBoundJobSpec } from "../src/tclk-browser-entry.mjs";
 
 const payer = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -28,6 +28,17 @@ test("builds an official live offer for the rendezvous room", () => {
   assert.equal(offer.asset, "PAPER");
   assert.equal(offer.job.proto, "a2a");
   assert.match(encodeFrame(offer), /^tclk1 \{/);
+});
+
+test("builds a short hash-bound verification job that another agent can finish quickly", async () => {
+  const prepared = await makeSimpleVerificationOffer({ from: payer, now: 1_800_000_000_000 });
+  assert.equal(prepared.offer.amount, "1000000");
+  assert.equal(prepared.offer.asset, "PAPER");
+  assert.equal(prepared.offer.expiresMs, 1_800_003_600_000);
+  assert.equal(prepared.offer.job.context, `/kv/${prepared.note.ns}/${prepared.note.key}`);
+  assert.match(prepared.spec, /^job-spec-v1 sha256=[0-9a-f]{64} \| Read-only verification/);
+  assert.match(SIMPLE_VERIFICATION_JOB, /Deliverable=150-300 chars/);
+  assert.ok(await verifyBoundJobSpec(prepared.spec, prepared.offer));
 });
 
 test("accepts only a signed protocol-valid independent accept and prepares payer lock", async () => {
