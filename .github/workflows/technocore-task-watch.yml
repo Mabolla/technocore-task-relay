@@ -1,6 +1,9 @@
 name: Technocore Task Watch
 
 on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/technocore-task-watch.yml]
   schedule:
     - cron: "17 * * * *"
   workflow_dispatch:
