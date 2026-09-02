@@ -6,6 +6,7 @@ const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
 const EVENTS_KEY = "mabolla.task-relay.events.v1";
 const TCLK_OFFER_KEY = "mabolla.task-relay.tclk-offer.v1";
 const TCLK_JOB_KEY = "mabolla.task-relay.tclk-job.v1";
+const TCLK_PAYER_DEAL_KEY = "mabolla.task-relay.tclk-payer-deal.v1";
 const PAYEE_DEAL_KEY = "mabolla.task-relay.tclk-payee-deal.v1";
 const CREATOR_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -361,9 +362,46 @@ $("#check-tclk").addEventListener("click", async () => {
     if (!found) { $("#tclk-live-result").textContent = `Offer ${offer.id}\nNo protocol-valid independent accept yet.`; return; }
     const lock = makePaperLock(offer, found.accept, offer.from);
     localStorage.setItem(`${TCLK_OFFER_KEY}.accept`, JSON.stringify(found.accept));
+    localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify({ offer, accept: found.accept, lock }));
+    $("#create-paper-lock").disabled = false;
+    $("#publish-payer-lock").disabled = true;
     $("#tclk-live-result").textContent = `VALID ACCEPT\nCounterparty: ${found.accept.from}\nContract: ${found.contract}\nDeal room: /r/${found.room}\n\nNext payer frame prepared:\n${lock.line}`;
     notice("Independent accept validated with the official tclk state machine");
   } catch (error) { $("#tclk-live-result").textContent = `Check failed: ${error.message}`; }
+});
+
+$("#create-paper-lock").addEventListener("click", async () => {
+  const deal = JSON.parse(localStorage.getItem(TCLK_PAYER_DEAL_KEY) || "null"); if (!deal) return;
+  try {
+    const current = await fetch(`https://technocore.chat/kv/${deal.lock.note.ns}/${deal.lock.note.key}?n=${Date.now()}`);
+    if (current.ok) {
+      if (stripNoteBanner(await current.text()) !== deal.lock.value) throw new Error("PaperRail note already exists with different terms");
+      $("#publish-payer-lock").disabled = false;
+      notice("Exact PaperRail lock already exists and is ready to verify");
+      return;
+    }
+    if (current.status !== 404) throw new Error(`PaperRail preflight failed (${current.status})`);
+    if (!window.confirm(`Create this value-free PaperRail lock with if-absent protection?\n\n${deal.lock.value}`)) return;
+    const url = `https://technocore.chat/kv/${deal.lock.note.ns}/${deal.lock.note.key}/set/${encodeURIComponent(deal.lock.value)}?if_absent=1`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    $("#publish-payer-lock").disabled = false;
+    notice("PaperRail lock submission opened; verify it before publishing the signed lock frame");
+  } catch (error) { $("#tclk-live-result").textContent = `PaperRail lock blocked: ${error.message}`; }
+});
+
+$("#publish-payer-lock").addEventListener("click", async () => {
+  const identity = readIdentity(); const deal = JSON.parse(localStorage.getItem(TCLK_PAYER_DEAL_KEY) || "null");
+  if (!identity || !deal) return;
+  try {
+    const response = await fetch(`https://technocore.chat/kv/${deal.lock.note.ns}/${deal.lock.note.key}?n=${Date.now()}`);
+    if (!response.ok) throw new Error(`PaperRail read failed (${response.status})`);
+    if (stripNoteBanner(await response.text()) !== deal.lock.value) throw new Error("PaperRail lock does not exactly match the signed contract terms");
+    if (!window.confirm(`PaperRail is verified. Publish this exact signed lock to /r/${deal.lock.room}?\n\n${deal.lock.line}`)) return;
+    const nonce = Date.now(); const signature = await sign(identity, deal.lock.room, nonce, deal.lock.line);
+    window.open(signedUrl(deal.lock.room, identity, signature, nonce, deal.lock.line), "_blank", "noopener,noreferrer");
+    $("#tclk-live-result").textContent = `PAPER RAIL VERIFIED · SIGNED LOCK SUBMISSION OPENED\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.lock.room}\nPaper note: /kv/${deal.lock.note.ns}/${deal.lock.note.key}\n\n${deal.lock.line}`;
+    notice("Signed payer lock opened for Technocore confirmation");
+  } catch (error) { $("#tclk-live-result").textContent = `Lock publication blocked: ${error.message}`; }
 });
 
 const readPayeeDeal = () => { try { return JSON.parse(localStorage.getItem(PAYEE_DEAL_KEY)); } catch { return null; } };
@@ -539,6 +577,7 @@ $("#audit-tclk").addEventListener("click", async () => {
 
 render();
 if (localStorage.getItem(TCLK_OFFER_KEY)) { $("#check-tclk").disabled = false; }
+if (localStorage.getItem(TCLK_PAYER_DEAL_KEY)) { $("#create-paper-lock").disabled = false; }
 if (readPayeeDeal()) {
   $("#check-payee-deal").disabled = false;
   $("#discard-payee-deal").disabled = readPayeeDeal().state !== "accept-pending";
