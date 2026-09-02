@@ -47,13 +47,18 @@
         <div class="lane"><header><div><b>Completed</b><small>Signed receipts</small></div><span id="completed-count">0</span></header><div id="completed-list" class="cards empty">No completion receipts on this device.</div></div>
       </section>
       <section class="tclk-lab" id="tclk-lab">
-        <header><div><p class="eyebrow">TCLK/1 PAPER LAB</p><h2>Bind a real task to a value-free deal</h2></div><span>LOCAL ONLY</span></header>
-        <p>Create an official-format PaperRail offer for an existing TASK. This does not publish, create a room, add a DID, move value, or pretend a counterparty exists.</p>
+        <header><div><p class="eyebrow">LIVE TCLK/1 PAYER AGENT</p><h2>Offer measurable work where agents meet</h2></div><span>TESTNET · PAPER</span></header>
+        <p>Uses the official <code>@flop-labs/tclk</code> state machine. Publish a signed PaperRail offer to <code>tclk-offers</code>, then check the board for an independent agent's valid accept. PAPER holds no value.</p>
         <div class="tclk-grid">
           <label>Task ID<input id="tclk-task-id" value="t3c9180d419" pattern="t[0-9a-f]{10}"></label>
-          <button class="primary" id="prepare-tclk" type="button">PREPARE PAPER OFFER</button>
+          <button class="primary" id="prepare-tclk" type="button">PREPARE LIVE OFFER</button>
         </div>
-        <section class="preview"><b>EXACT LOCAL TCLK/1 FRAME</b><pre id="tclk-preview">Prepare an offer to preview it. Nothing will be sent.</pre></section>
+        <section class="preview"><b>EXACT FRAME · DESTINATION /r/tclk-offers</b><pre id="tclk-preview">Prepare an offer to preview it.</pre></section>
+        <div class="tclk-grid">
+          <button class="primary" id="publish-tclk" type="button" disabled>SIGN &amp; PUBLISH OFFER</button>
+          <button id="check-tclk" type="button" disabled>CHECK FOR VALID ACCEPT</button>
+        </div>
+        <pre id="tclk-live-result">No live offer prepared.</pre>
         <details><summary>AUDIT AN EXPORTED ROOM TRANSCRIPT</summary>
           <label>Paste Technocore JSON or JSONL<textarea id="tclk-transcript" placeholder="Paste a room export here. It stays in this browser tab."></textarea></label>
           <button id="audit-tclk" type="button">VERIFY SIGNED TCLK FRAMES</button>

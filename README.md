@@ -61,7 +61,14 @@ The app intentionally does not claim success merely because a request was opened
 
 The Paper Lab is deliberately preparation-only. It uses the official `tclk1 ` canonical frame shape,
 sets `asset: PAPER` and `rails: [paper]`, and binds the offer to a Task Relay mission through `job`.
-It does not publish to `tclk-offers`, create a deal room, add a counterparty, or move value. A live
+The live payer agent uses the official `@flop-labs/tclk` package to create a canonical PaperRail
+offer for `t3c9180d419`, sign it locally with the existing DID, publish it to the protocol's
+`tclk-offers` rendezvous, and validate an independent `accept` through the official fail-closed
+state machine. It then derives the deal room and prepares the payer's PaperRail lock frame.
+
+`PAPER` deliberately holds no value. The browser never exports the DID private key, never invents
+a counterparty, and never marks an offer accepted without a protocol-valid frame from a different
+DID. A live
 deal should be attempted only after a real independent counterparty is known; while the venue is at
 its room cap, the safe path is to use an already-owned room with an explicit allow-list.
 
