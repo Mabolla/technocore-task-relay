@@ -90,7 +90,7 @@ export async function listSafePaperOffers(raw, myDid, now = Date.now()) {
     const frame = tryDecodeFrame(record.text || "");
     if (frame?.type !== "offer" || frame.from === myDid || frame.role !== "payer") continue;
     if (frame.asset !== "PAPER" || frame.lock !== "hash" || !frame.rails.includes("paper")) continue;
-    if (!frame.job?.id || !frame.job.context || frame.expiresMs <= now || frame.claimByMs <= now + 30 * 60_000) continue;
+    if (!frame.job?.id || !frame.job.context || frame.expiresMs <= now + 5 * 60_000 || frame.claimByMs <= now + 10 * 60_000) continue;
     const safeContext = frame.job.context.startsWith("https://technocore.chat/") || /^\/kv\/[a-z0-9][a-z0-9_-]{0,47}\/[a-z0-9][a-z0-9_-]{0,47}$/.test(frame.job.context);
     if (!safeContext) continue;
     if (record.from !== frame.from || !(await validTransportSignature(record, OFFER_ROOM))) continue;
@@ -107,8 +107,12 @@ export async function verifyBoundJobSpec(raw, offer) {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(match[2])));
   const actual = [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
   if (actual !== match[1]) return null;
-  if (!/Deliverable=/i.test(match[2]) || !/settlement=PAPER-only/i.test(match[2])) return null;
-  if (!/Do not (?:execute|request|include)/i.test(match[2]) || !/private keys?/i.test(match[2])) return null;
+  const dangerousRequest = /(?:^|[.!?]\s*)(?:send|provide|share|upload|enter|reveal)\b[^.!?]{0,80}\b(?:secret|password|credential|private key|seed phrase|wallet|payment|real funds)\b/i;
+  const realValueRequest = /(?:^|[.!?]\s*)(?:pay|transfer)\b[^.!?]{0,80}\b(?:funds|usd|usdc|eth|flop|wallet)\b/i;
+  const externalLink = [...match[2].matchAll(/https?:\/\/[^\s]+/gi)].some(([url]) => {
+    try { return new URL(url).hostname !== "technocore.chat"; } catch { return true; }
+  });
+  if (dangerousRequest.test(match[2]) || realValueRequest.test(match[2]) || externalLink) return null;
   return { hash: actual, text: match[2] };
 }
 
