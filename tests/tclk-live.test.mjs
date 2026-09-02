@@ -67,7 +67,7 @@ test("ignores unsigned and unrelated frames", async () => {
 
 test("lists only signed, external, unexpired PAPER jobs", async () => {
   const now = 1_800_000_000_000; const other = await signer();
-  const offer = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 6 * 60_000, claimByMs: now + 11 * 60_000, refundAfterMs: now + 20 * 60_000, job: { proto: "a2a", id: "job-1", context: "https://technocore.chat/r/example" } });
+  const offer = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 31 * 60_000, claimByMs: now + 46 * 60_000, refundAfterMs: now + 60 * 60_000, job: { proto: "a2a", id: "job-1", context: "https://technocore.chat/r/example" } });
   const signed = await record(other, OFFER_ROOM, encodeFrame(offer), "1800000000001", new Date(now).toISOString());
   const found = await listSafePaperOffers({ messages: [signed, { from: other.did, text: encodeFrame(offer) }] }, payer, now);
   assert.equal(found.length, 1); assert.equal(found[0].offer.id, offer.id);
