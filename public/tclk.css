@@ -1,0 +1,17 @@
+.tclk-lab {
+  margin-top: 16px;
+  border: 1px solid #2c5c45;
+  background: #09130f;
+  padding: 20px;
+}
+.tclk-lab > header { display: flex; justify-content: space-between; gap: 20px; }
+.tclk-lab h2 { margin: 3px 0; }
+.tclk-lab > header > span { color: var(--green); font-size: 11px; letter-spacing: .12em; }
+.tclk-lab > p, .tclk-lab summary { color: var(--muted); }
+.tclk-grid { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 14px; }
+.tclk-grid label { margin: 10px 0; }
+.tclk-lab details { margin-top: 16px; }
+.tclk-lab summary { cursor: pointer; }
+.tclk-lab details button { background: none; border: 1px solid var(--green); color: var(--green); padding: 10px; cursor: pointer; }
+.tclk-lab details pre { white-space: pre-wrap; color: var(--muted); }
+@media (max-width: 900px) { .tclk-grid { grid-template-columns: 1fr; } }

@@ -1,3 +1,5 @@
+import { auditTranscript, encodeFrame, makePaperOffer } from "./tclk.js";
+
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
 const EVENTS_KEY = "mabolla.task-relay.events.v1";
@@ -282,6 +284,27 @@ $("#mission-form").addEventListener("submit", async (event) => {
   const payload = eventPayload(String(data.get("title")), String(data.get("detail")), agentNameOf(identity), Date.now(), String(data.get("task-id")));
   await publishSigned(payload, identity);
   event.currentTarget.reset(); $("#mission-dialog").close(); render();
+});
+
+$("#prepare-tclk").addEventListener("click", async () => {
+  const identity = readIdentity();
+  if (!identity) { notice("Restore the existing DID before preparing a tclk offer"); return; }
+  try {
+    const offer = await makePaperOffer({ from: identity.did, jobId: clean($("#tclk-task-id").value) });
+    $("#tclk-preview").textContent = encodeFrame(offer);
+    notice("Paper offer prepared locally — nothing was published");
+  } catch (error) { notice(error.message); }
+});
+
+$("#audit-tclk").addEventListener("click", async () => {
+  try {
+    const report = await auditTranscript($("#tclk-transcript").value, ROOM, clean($("#tclk-task-id").value));
+    const rows = report.findings.map((item) => `seq ${item.seq ?? "?"}  ${item.type.padEnd(8)}  signature=${item.signatureValid ? "valid" : "INVALID"}`);
+    $("#tclk-audit-result").textContent = rows.length
+      ? `${rows.join("\n")}\n\nMatched: ${rows.length} | All signatures valid: ${report.allSignaturesValid}`
+      : `No tclk/1 frames bound to this task were found in ${report.records} records.`;
+    notice("Transcript audit completed locally");
+  } catch (error) { $("#tclk-audit-result").textContent = `Audit failed: ${error.message}`; }
 });
 
 render();
