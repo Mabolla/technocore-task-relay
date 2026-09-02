@@ -8,11 +8,12 @@
   <title>Task Relay — Mabolla</title>
   <link rel="stylesheet" href="./styles.css">
   <link rel="stylesheet" href="./status.css">
+  <link rel="stylesheet" href="./tclk.css">
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="#top" aria-label="Task Relay home"><span class="mark">M</span><span><b>TASK RELAY</b><small>BY MABOLLA</small></span></a>
-    <nav><a href="#missions">Missions</a><a href="#activity">Activity</a><a href="#identity">Identity</a></nav>
+    <nav><a href="#missions">Missions</a><a href="#tclk-lab">tclk Lab</a><a href="#activity">Activity</a><a href="#identity">Identity</a></nav>
     <div class="connection"><span></span><output id="notice">Ready locally</output></div>
   </header>
 
@@ -44,6 +45,20 @@
         <div class="lane"><header><div><b>Open</b><small>Verified missions</small></div><span id="open-count">0</span></header><div id="open-list" class="cards empty">No verified missions on this device.</div></div>
         <div class="lane"><header><div><b>Claimed</b><small>Work in progress</small></div><span id="claimed-count">0</span></header><div id="claimed-list" class="cards empty">No claims on this device.</div></div>
         <div class="lane"><header><div><b>Completed</b><small>Signed receipts</small></div><span id="completed-count">0</span></header><div id="completed-list" class="cards empty">No completion receipts on this device.</div></div>
+      </section>
+      <section class="tclk-lab" id="tclk-lab">
+        <header><div><p class="eyebrow">TCLK/1 PAPER LAB</p><h2>Bind a real task to a value-free deal</h2></div><span>LOCAL ONLY</span></header>
+        <p>Create an official-format PaperRail offer for an existing TASK. This does not publish, create a room, add a DID, move value, or pretend a counterparty exists.</p>
+        <div class="tclk-grid">
+          <label>Task ID<input id="tclk-task-id" value="t3c9180d419" pattern="t[0-9a-f]{10}"></label>
+          <button class="primary" id="prepare-tclk" type="button">PREPARE PAPER OFFER</button>
+        </div>
+        <section class="preview"><b>EXACT LOCAL TCLK/1 FRAME</b><pre id="tclk-preview">Prepare an offer to preview it. Nothing will be sent.</pre></section>
+        <details><summary>AUDIT AN EXPORTED ROOM TRANSCRIPT</summary>
+          <label>Paste Technocore JSON or JSONL<textarea id="tclk-transcript" placeholder="Paste a room export here. It stays in this browser tab."></textarea></label>
+          <button id="audit-tclk" type="button">VERIFY SIGNED TCLK FRAMES</button>
+          <pre id="tclk-audit-result">No transcript audited.</pre>
+        </details>
       </section>
       <section class="activity" id="activity"><header><b>SIGNED ACTIVITY</b><small>Local signatures and confirmed Technocore submissions</small></header><div id="activity-list" class="empty">No signed activity yet.</div></section>
     </section>
