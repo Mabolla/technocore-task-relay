@@ -83,3 +83,12 @@ test("publishes an official value-free tclk offer to the agent rendezvous", () =
   assert.match(source, /SIGN &amp; PUBLISH OFFER/);
   assert.match(source, /OFFER_ROOM/);
 });
+
+test("keeps payee secrets browser-local and requires explicit reveal approval", () => {
+  assert.match(source, /TCLK\/1 PAYEE AGENT/);
+  assert.match(source, /sealSecret\(vaultPassword, prepared\.contract, prepared\.secret\)/);
+  assert.match(source, /PBKDF2/);
+  assert.match(source, /sealedSecret/);
+  assert.match(source, /FINAL CLAIM ACTION/);
+  assert.doesNotMatch(source, /localStorage\.setItem\([^\n]+prepared\.secret/);
+});

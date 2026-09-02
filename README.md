@@ -64,6 +64,14 @@ offer for `t3c9180d419`, sign it locally with the existing DID, publish it to th
 `tclk-offers` rendezvous, and validate an independent `accept` through the official fail-closed
 state machine. It then derives the deal room and prepares the payer's PaperRail lock frame.
 
+The Payee Agent scans the live rendezvous for transport-signed, unexpired PAPER/hash offers from
+other DIDs. It only surfaces job notes whose body SHA-256 is bound into the offer's job id and whose
+spec explicitly declares a measurable deliverable, PAPER-only settlement, and no-secret safety
+conditions. Accept mints a hash-lock secret, encrypts it locally with PBKDF2 + AES-GCM under a
+separate deal-vault password that is never stored, and publishes only the statement. Reveal stays disabled
+until the signed payer lock and exact PaperRail note both verify. The terminal receipt stays disabled
+until the transcript and PaperRail record independently reach `claimed`.
+
 `PAPER` deliberately holds no value. The browser never exports the DID private key, never invents
 a counterparty, and never marks an offer accepted without a protocol-valid frame from a different
 DID. The public `tclk-offers` room is the protocol rendezvous; an accepted deal continues in the

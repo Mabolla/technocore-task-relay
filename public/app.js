@@ -1,10 +1,11 @@
 import { auditTranscript } from "./tclk.js";
-import { OFFER_ROOM, encodeFrame, findValidAccept, makeLivePaperOffer, makePaperLock } from "./tclk-official.js";
+import { OFFER_ROOM, classifyPaperRecord, encodeFrame, expectedPaperClaim, expectedPaperLock, findValidAccept, foldPayeeDeal, listSafePaperOffers, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, verifyAcceptRecord, verifyBoundJobSpec } from "./tclk-official.js";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
 const EVENTS_KEY = "mabolla.task-relay.events.v1";
 const TCLK_OFFER_KEY = "mabolla.task-relay.tclk-offer.v1";
+const PAYEE_DEAL_KEY = "mabolla.task-relay.tclk-payee-deal.v1";
 const CREATOR_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const NETWORK_PROOF = [{
@@ -61,6 +62,22 @@ async function sign(identity, room, nonce, text) {
   const key = await crypto.subtle.importKey("pkcs8", base64ToBytes(identity.privateKey), { name: "Ed25519" }, false, ["sign"]);
   const signature = await crypto.subtle.sign("Ed25519", key, new TextEncoder().encode(`${room}|${nonce}|${text}`));
   return base64url(new Uint8Array(signature));
+}
+
+async function dealVaultKey(passphrase, salt, iterations) {
+  const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, material, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+async function sealSecret(passphrase, contract, secret) {
+  const salt = crypto.getRandomValues(new Uint8Array(16)); const iv = crypto.getRandomValues(new Uint8Array(12)); const iterations = 250000;
+  const key = await dealVaultKey(passphrase, salt, iterations);
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode(contract) }, key, new TextEncoder().encode(secret));
+  return { salt: bytesToBase64(salt), iv: bytesToBase64(iv), iterations, ciphertext: bytesToBase64(new Uint8Array(ciphertext)) };
+}
+async function openSecret(passphrase, contract, sealed) {
+  const key = await dealVaultKey(passphrase, base64ToBytes(sealed.salt), sealed.iterations);
+  const bytes = await crypto.subtle.decrypt({ name: "AES-GCM", iv: base64ToBytes(sealed.iv), additionalData: new TextEncoder().encode(contract) }, key, base64ToBytes(sealed.ciphertext));
+  return new TextDecoder().decode(bytes);
 }
 
 async function fingerprint(did) {
@@ -326,6 +343,128 @@ $("#check-tclk").addEventListener("click", async () => {
   } catch (error) { $("#tclk-live-result").textContent = `Check failed: ${error.message}`; }
 });
 
+const readPayeeDeal = () => { try { return JSON.parse(localStorage.getItem(PAYEE_DEAL_KEY)); } catch { return null; } };
+function contextUrl(context) { return context.startsWith("/kv/") ? `https://technocore.chat${context}` : context; }
+
+function renderPayeeOffers(items) {
+  const root = $("#payee-candidates"); root.classList.toggle("empty", !items.length);
+  root.replaceChildren(...(items.length ? items.map(({ offer, seq, spec }) => {
+    const card = document.createElement("article"); card.className = "mission";
+    const id = document.createElement("code"); id.textContent = `seq #${seq} · ${offer.id.slice(0, 18)}…`;
+    const title = document.createElement("h2"); title.textContent = `${offer.job.proto.toUpperCase()} · ${offer.job.id}`;
+    const detail = document.createElement("p"); detail.textContent = `${offer.amount} ${offer.asset} · hash lock · expires ${new Date(offer.expiresMs).toLocaleString()}\n${spec.text.slice(0, 600)}`;
+    const link = document.createElement("a"); link.href = contextUrl(offer.job.context); link.target = "_blank"; link.rel = "noopener noreferrer"; link.textContent = "REVIEW JOB CONTEXT ↗";
+    const accept = document.createElement("button"); accept.textContent = "ACCEPT WITH MY DID →";
+    accept.addEventListener("click", () => acceptPaperOffer(offer));
+    card.append(id, title, detail, link, accept); return card;
+  }) : [document.createTextNode("No safe, signed, unexpired PaperRail offers found.")]));
+}
+
+$("#scan-offers").addEventListener("click", async () => {
+  const identity = readIdentity(); if (!identity) { notice("Restore the existing DID before scanning offers"); return; }
+  try {
+    const response = await fetch(`https://technocore.chat/r/${OFFER_ROOM}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(`Technocore read failed (${response.status})`);
+    const offers = await listSafePaperOffers(await response.json(), identity.did);
+    const verified = [];
+    for (const candidate of offers) {
+      const specResponse = await fetch(`${contextUrl(candidate.offer.job.context)}?n=${Date.now()}`);
+      if (!specResponse.ok) continue;
+      const spec = await verifyBoundJobSpec(await specResponse.text(), candidate.offer);
+      if (spec) verified.push({ ...candidate, spec });
+    }
+    renderPayeeOffers(verified); notice(`${verified.length} signed offer${verified.length === 1 ? "" : "s"} with a hash-bound safe job found`);
+  } catch (error) { $("#payee-status").textContent = `Scan failed: ${error.message}`; }
+});
+
+async function acceptPaperOffer(offer) {
+  const identity = readIdentity(); if (!identity) return;
+  if (readPayeeDeal()) { notice("Finish the active payee deal before accepting another"); return; }
+  const prepared = makePayeeAcceptance(offer, identity.did);
+  if (!window.confirm(`Accept this exact PAPER job as payee?\n\nJob: ${offer.job.id}\nPayer: ${offer.from}\nContract: ${prepared.contract}\n\nThe hash-lock secret will be encrypted locally and never sent before reveal.`)) return;
+  const vaultPassword = window.prompt("Create a separate deal-vault password (minimum 12 characters). It is not stored and cannot be recovered.");
+  if (!vaultPassword || vaultPassword.length < 12) { notice("Accept cancelled — deal-vault password must be at least 12 characters"); return; }
+  const sealedSecret = await sealSecret(vaultPassword, prepared.contract, prepared.secret);
+  const deal = { offer, accept: prepared.accept, room: prepared.room, sealedSecret, acceptedAt: new Date().toISOString(), state: "accept-pending" };
+  localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
+  const nonce = Date.now(); const signature = await sign(identity, OFFER_ROOM, nonce, prepared.line);
+  window.open(signedUrl(OFFER_ROOM, identity, signature, nonce, prepared.line), "_blank", "noopener,noreferrer");
+  $("#check-payee-deal").disabled = false;
+  $("#payee-status").textContent = `ACCEPT SUBMISSION OPENED\nContract: ${prepared.contract}\nDeal room: /r/${prepared.room}\nSecret: encrypted in this browser`;
+  notice("Accept opened for Technocore confirmation; check the deal after it is accepted");
+}
+
+function stripNoteBanner(text) {
+  return text.split("\n").filter((line) => !line.startsWith("!!") && line.trim()).join("\n").trimEnd();
+}
+
+$("#check-payee-deal").addEventListener("click", async () => {
+  const deal = readPayeeDeal(); if (!deal) return;
+  try {
+    const boardResponse = await fetch(`https://technocore.chat/r/${OFFER_ROOM}?limit=200&format=json&n=${Date.now()}`);
+    if (!boardResponse.ok) throw new Error(`Offer board read failed (${boardResponse.status})`);
+    const accepted = await verifyAcceptRecord(await boardResponse.json(), deal.offer, deal.accept);
+    if (!accepted) { $("#payee-status").textContent = "Accept is not yet confirmed in tclk-offers."; return; }
+    const roomResponse = await fetch(`https://technocore.chat/r/${deal.room}?limit=200&format=json&n=${Date.now()}`);
+    if (!roomResponse.ok) throw new Error(`Deal room read failed (${roomResponse.status})`);
+    const folded = await foldPayeeDeal(await roomResponse.json(), deal.offer, deal.accept);
+    let lockValid = false; let railState = "absent";
+    if (folded.state.status === "locked" || folded.state.status === "claimed") {
+      const expected = expectedPaperLock(deal.offer, deal.accept);
+      if (folded.state.rail !== "paper" || folded.state.railRef !== expected.ref) throw new Error("Payer lock frame does not name the expected PaperRail record");
+      const noteResponse = await fetch(`https://technocore.chat/kv/${expected.note.ns}/${expected.note.key}?n=${Date.now()}`);
+      const noteValue = noteResponse.ok ? stripNoteBanner(await noteResponse.text()) : "";
+      railState = classifyPaperRecord(noteValue, deal.offer, deal.accept);
+      lockValid = railState === "locked" || railState === "claimed";
+      if (!lockValid) throw new Error("PaperRail note is missing or does not match the signed contract");
+    }
+    deal.state = folded.state.status; deal.acceptSeq = accepted.seq; deal.lockValid = lockValid; deal.railState = railState;
+    localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
+    $("#work-complete").disabled = folded.state.status !== "locked" || !lockValid;
+    $("#claim-paper").disabled = !(folded.state.status === "claimed" && railState === "locked");
+    $("#publish-receipt").disabled = !(folded.state.status === "claimed" && railState === "claimed");
+    $("#payee-status").textContent = `ACCEPT VERIFIED · seq #${accepted.seq}\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.room}\nTranscript state: ${folded.state.status}\nPaperRail state: ${railState}`;
+    notice(`Payee deal state: ${folded.state.status}`);
+  } catch (error) { $("#payee-status").textContent = `Deal check failed: ${error.message}`; }
+});
+
+$("#claim-paper").addEventListener("click", async () => {
+  const identity = readIdentity(); const deal = readPayeeDeal();
+  if (!identity || deal?.state !== "claimed" || deal.railState !== "locked" || Date.now() >= deal.offer.refundAfterMs) return;
+  const vaultPassword = window.prompt("Enter the deal-vault password to decrypt the secret for the PaperRail claim."); if (!vaultPassword) return;
+  let secret; try { secret = await openSecret(vaultPassword, deal.accept.contract, deal.sealedSecret); } catch { notice("Deal-vault password is incorrect"); return; }
+  const claim = expectedPaperClaim(deal.offer, deal.accept, secret);
+  if (!window.confirm("Advance the value-free PaperRail record from locked to claimed using compare-and-set? The secret is already public in the signed reveal.")) return;
+  const url = `https://technocore.chat/kv/${claim.note.ns}/${claim.note.key}/set/${encodeURIComponent(claim.value)}?if=${encodeURIComponent(claim.lockedValue)}`;
+  const response = await fetch(url);
+  if (!response.ok) { notice(`PaperRail claim failed (${response.status}); check the deal state`); return; }
+  notice("PaperRail advanced to claimed; check the deal before issuing the receipt");
+});
+
+$("#work-complete").addEventListener("change", (event) => {
+  const deal = readPayeeDeal(); $("#publish-reveal").disabled = !(event.target.checked && deal?.state === "locked" && deal?.lockValid);
+});
+
+$("#publish-reveal").addEventListener("click", async () => {
+  const identity = readIdentity(); const deal = readPayeeDeal(); if (!identity || !deal?.lockValid || deal.state !== "locked") return;
+  const vaultPassword = window.prompt("Enter the deal-vault password to decrypt the reveal secret."); if (!vaultPassword) return;
+  let secret; try { secret = await openSecret(vaultPassword, deal.accept.contract, deal.sealedSecret); } catch { notice("Deal-vault password is incorrect"); return; }
+  const reveal = makePayeeReveal(deal.accept, identity.did, secret);
+  if (!window.confirm(`FINAL CLAIM ACTION\n\nPublishing this reveal exposes the contract secret permanently and claims the PaperRail rehearsal. Continue only if the job is complete and the lock was verified.\n\n${reveal.line}`)) return;
+  const nonce = Date.now(); const signature = await sign(identity, reveal.room, nonce, reveal.line);
+  window.open(signedUrl(reveal.room, identity, signature, nonce, reveal.line), "_blank", "noopener,noreferrer");
+  notice("Reveal opened for Technocore confirmation; re-check the deal before issuing a receipt");
+});
+
+$("#publish-receipt").addEventListener("click", async () => {
+  const identity = readIdentity(); const deal = readPayeeDeal(); if (!identity || deal?.state !== "claimed") return;
+  const receipt = makePayeeReceipt(deal.accept, identity.did);
+  if (!window.confirm(`Publish this terminal claimed receipt?\n\n${receipt.line}`)) return;
+  const nonce = Date.now(); const signature = await sign(identity, receipt.room, nonce, receipt.line);
+  window.open(signedUrl(receipt.room, identity, signature, nonce, receipt.line), "_blank", "noopener,noreferrer");
+  notice("Claimed receipt opened for Technocore confirmation");
+});
+
 $("#audit-tclk").addEventListener("click", async () => {
   try {
     const report = await auditTranscript($("#tclk-transcript").value, ROOM, clean($("#tclk-task-id").value));
@@ -339,3 +478,4 @@ $("#audit-tclk").addEventListener("click", async () => {
 
 render();
 if (localStorage.getItem(TCLK_OFFER_KEY)) { $("#publish-tclk").disabled = false; $("#check-tclk").disabled = false; }
+if (readPayeeDeal()) { $("#check-payee-deal").disabled = false; $("#payee-status").textContent = `Active contract: ${readPayeeDeal().accept.contract}\nCheck the deal state to continue.`; }
