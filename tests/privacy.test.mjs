@@ -108,3 +108,14 @@ test("locks the value-free payer rail before publishing the signed lock frame", 
   assert.match(source, /VERIFY &amp; PUBLISH SIGNED LOCK/);
   assert.match(source, /sign\(identity, deal\.lock\.room, nonce, deal\.lock\.line\)/);
 });
+
+
+test("restores and advances an active payer deal after refresh", () => {
+  assert.match(source, /ACTIVE PAYER DEAL · SURVIVES REFRESH/);
+  assert.match(source, /readPayerDeal/);
+  assert.match(source, /renderPayerDeal\(\)/);
+  assert.match(source, /CHECK RESULT \/ REVEAL/);
+  assert.match(source, /foldPayeeDeal\(await roomResponse\.json\(\), deal\.offer, deal\.accept\)/);
+  assert.match(source, /SIGN CLAIMED RECEIPT/);
+  assert.match(source, /Payer receipt opened for Technocore confirmation/);
+});

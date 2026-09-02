@@ -94,6 +94,26 @@ function signedUrl(room, identity, signature, nonce, text) {
 
 const readIdentity = () => { try { return JSON.parse(localStorage.getItem(IDENTITY_KEY)); } catch { return null; } };
 const readEvents = () => { try { return JSON.parse(localStorage.getItem(EVENTS_KEY)) || []; } catch { return []; } };
+const readPayerDeal = () => { try { return JSON.parse(localStorage.getItem(TCLK_PAYER_DEAL_KEY)); } catch { return null; } };
+
+function renderPayerDeal() {
+  const deal = readPayerDeal();
+  $("#open-payer-room").disabled = !deal;
+  $("#check-payer-deal").disabled = !deal;
+  $("#publish-payer-receipt").disabled = !(deal?.state === "claimed" && deal?.railState === "claimed");
+  if (!deal) {
+    $("#payer-deal-status").textContent = "No active payer deal saved in this browser.";
+    return;
+  }
+  const state = deal.state || "accepted / lock prepared";
+  const rail = deal.railState || "check required";
+  const next = state === "claimed" && rail === "claimed"
+    ? "NEXT: Sign the claimed receipt to close the deal."
+    : state === "claimed"
+      ? "NEXT: Wait for the payee to advance PaperRail, then check again."
+      : "NEXT: Wait for the payee's signed result/reveal, then press CHECK RESULT / REVEAL.";
+  $("#payer-deal-status").textContent = `Contract: ${deal.accept.contract}\nCounterparty: ${deal.accept.from}\nDeal room: /r/${deal.lock.room}\nTranscript state: ${state}\nPaperRail state: ${rail}\n${next}`;
+}
 const agentNameOf = (identity) => identity?.agentName || (identity?.did === CREATOR_DID ? "Mabolla Agent" : "Task Relay Agent");
 const initialsOf = (name) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "TR";
 
@@ -366,6 +386,7 @@ $("#check-tclk").addEventListener("click", async () => {
     $("#create-paper-lock").disabled = false;
     $("#publish-payer-lock").disabled = true;
     $("#tclk-live-result").textContent = `VALID ACCEPT\nCounterparty: ${found.accept.from}\nContract: ${found.contract}\nDeal room: /r/${found.room}\n\nNext payer frame prepared:\n${lock.line}`;
+    renderPayerDeal();
     notice("Independent accept validated with the official tclk state machine");
   } catch (error) { $("#tclk-live-result").textContent = `Check failed: ${error.message}`; }
 });
@@ -400,8 +421,48 @@ $("#publish-payer-lock").addEventListener("click", async () => {
     const nonce = Date.now(); const signature = await sign(identity, deal.lock.room, nonce, deal.lock.line);
     window.open(signedUrl(deal.lock.room, identity, signature, nonce, deal.lock.line), "_blank", "noopener,noreferrer");
     $("#tclk-live-result").textContent = `PAPER RAIL VERIFIED · SIGNED LOCK SUBMISSION OPENED\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.lock.room}\nPaper note: /kv/${deal.lock.note.ns}/${deal.lock.note.key}\n\n${deal.lock.line}`;
+    deal.state = "lock-submitted"; deal.lockSubmittedAt = new Date().toISOString();
+    localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify(deal));
+    renderPayerDeal();
     notice("Signed payer lock opened for Technocore confirmation");
   } catch (error) { $("#tclk-live-result").textContent = `Lock publication blocked: ${error.message}`; }
+});
+
+$("#open-payer-room").addEventListener("click", () => {
+  const deal = readPayerDeal(); if (!deal) return;
+  window.open(`https://technocore.chat/r/${deal.lock.room}`, "_blank", "noopener,noreferrer");
+});
+
+$("#check-payer-deal").addEventListener("click", async () => {
+  const deal = readPayerDeal(); if (!deal) return;
+  try {
+    const roomResponse = await fetch(`https://technocore.chat/r/${deal.lock.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" } });
+    if (!roomResponse.ok) throw new Error(`Deal room read failed (${roomResponse.status})`);
+    const folded = await foldPayeeDeal(await roomResponse.json(), deal.offer, deal.accept);
+    const expected = expectedPaperLock(deal.offer, deal.accept);
+    let railState = "absent";
+    const noteResponse = await fetch(`https://technocore.chat/kv/${expected.note.ns}/${expected.note.key}?n=${Date.now()}`);
+    if (noteResponse.ok) railState = classifyPaperRecord(stripNoteBanner(await noteResponse.text()), deal.offer, deal.accept);
+    deal.state = folded.state.status; deal.railState = railState; deal.checkedAt = new Date().toISOString();
+    localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify(deal));
+    renderPayerDeal();
+    notice(folded.state.status === "claimed" ? "Valid payee reveal found" : "No valid payee reveal yet");
+  } catch (error) {
+    $("#payer-deal-status").textContent = `Payer deal check failed: ${error.message}\nSaved deal data was preserved.`;
+  }
+});
+
+$("#publish-payer-receipt").addEventListener("click", async () => {
+  const identity = readIdentity(); const deal = readPayerDeal();
+  if (!identity || deal?.state !== "claimed" || deal?.railState !== "claimed") return;
+  const receipt = makePayeeReceipt(deal.accept, identity.did);
+  if (!window.confirm(`Close this completed payer deal with a signed claimed receipt?\n\n${receipt.line}`)) return;
+  const nonce = Date.now(); const signature = await sign(identity, receipt.room, nonce, receipt.line);
+  window.open(signedUrl(receipt.room, identity, signature, nonce, receipt.line), "_blank", "noopener,noreferrer");
+  deal.receiptSubmittedAt = new Date().toISOString();
+  localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify(deal));
+  renderPayerDeal();
+  notice("Payer receipt opened for Technocore confirmation");
 });
 
 const readPayeeDeal = () => { try { return JSON.parse(localStorage.getItem(PAYEE_DEAL_KEY)); } catch { return null; } };
@@ -578,6 +639,7 @@ $("#audit-tclk").addEventListener("click", async () => {
 render();
 if (localStorage.getItem(TCLK_OFFER_KEY)) { $("#check-tclk").disabled = false; }
 if (localStorage.getItem(TCLK_PAYER_DEAL_KEY)) { $("#create-paper-lock").disabled = false; }
+renderPayerDeal();
 if (readPayeeDeal()) {
   $("#check-payee-deal").disabled = false;
   $("#discard-payee-deal").disabled = readPayeeDeal().state !== "accept-pending";
