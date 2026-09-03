@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeAccept, generateHashLock, makeOffer, verifySecret } from "@flop-labs/tclk";
-import { OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, encodeFrame, expectedPaperClaim, findValidAccept, foldPayeeDeal, listSafePaperOffers, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makeSimpleVerificationOffer, verifyBoundJobSpec } from "../src/tclk-browser-entry.mjs";
+import { OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, encodeFrame, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, listSafePaperOffers, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerRefund, makeSimpleVerificationOffer, verifyBoundJobSpec } from "../src/tclk-browser-entry.mjs";
 
 const payer = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -103,6 +103,17 @@ test("mints a payee secret and folds a signed payer lock", async () => {
   const signedLock = await record(other, prepared.room, encodeFrame(lock), String(now + 2), new Date(now + 2).toISOString());
   const folded = await foldPayeeDeal({ messages: [signedLock] }, offer, prepared.accept, now + 3);
   assert.equal(folded.state.status, "locked"); assert.equal(folded.state.railRef, prepared.contract);
+});
+
+test("builds a terminal payer refund and matching PaperRail transition", async () => {
+  const now = Date.now(); const other = await signer(); const payee = await signer();
+  const offer = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 60_000, claimByMs: now + 120_000, refundAfterMs: now + 180_000, job: { proto: "a2a", id: "job-refund", context: "/kv/jobs/job-refund" } });
+  const prepared = makePayeeAcceptance(offer, payee.did);
+  const rail = expectedPaperRefund(offer, prepared.accept);
+  assert.match(rail.lockedValue, /^tclkpaper1 locked hash/);
+  assert.match(rail.value, /^tclkpaper1 refunded hash/);
+  const refund = makePayerRefund(prepared.accept, other.did);
+  assert.match(refund.line, /^tclk1 \{"contract":.*"type":"refund"\}$/);
 });
 
 test("accepts only hash-bound, PAPER-only safe job notes", async () => {
