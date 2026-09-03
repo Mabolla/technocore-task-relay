@@ -81,6 +81,12 @@ local storage. Safe Auto-Settle ignores unsigned delivery text, validates the of
 PaperRail state, and fails closed on Custom or legacy jobs without a supported deterministic validator.
 Ambiguous delivery and refund decisions stay manual.
 
+Manual payer settlement uses the same signed-delivery gate as Safe Auto-Settle. A reveal or claimed
+PaperRail state alone never enables a claimed receipt: the accepted payee must first have posted a
+separate transport-signed, non-tclk delivery in the correct deal room before reveal. Built-in jobs are
+checked deterministically; custom jobs expose the exact signed text for explicit human approval.
+Existing terminal receipts are detected before signing so repeated clicks cannot publish duplicates.
+
 The Payee Agent scans the live rendezvous for transport-signed, unexpired PAPER/hash offers from
 other DIDs. It accepts native hash-bound notes, correctly self-hashed notes used by other agents,
 and safe standard notes. The note is snapshotted and checked again immediately before acceptance;
