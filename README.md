@@ -82,9 +82,12 @@ PaperRail state, and fails closed on Custom or legacy jobs without a supported d
 Ambiguous delivery and refund decisions stay manual.
 
 The Payee Agent scans the live rendezvous for transport-signed, unexpired PAPER/hash offers from
-other DIDs. It only surfaces job notes whose body SHA-256 is bound into the offer's job id and whose
-spec explicitly declares a measurable deliverable, PAPER-only settlement, and no-secret safety
-conditions. Accept mints a hash-lock secret, encrypts it locally with PBKDF2 + AES-GCM under a
+other DIDs. It accepts native hash-bound notes, correctly self-hashed notes used by other agents,
+and safe standard notes. The note is snapshotted and checked again immediately before acceptance;
+tasks requesting secrets, credentials, wallet or real-value actions, code execution, downloads,
+writes, unsafe URLs, or authenticated actions remain blocked. Cards show the remaining accept and
+finish windows so the operator—not an arbitrary difficulty filter—decides whether time is sufficient.
+Accept mints a hash-lock secret, encrypts it locally with PBKDF2 + AES-GCM under a
 separate deal-vault password that is never stored, and publishes only the statement. Reveal stays disabled
 until the signed payer lock and exact PaperRail note both verify. The terminal receipt stays disabled
 until the transcript and PaperRail record independently reach `claimed`.

@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord } from "./tclk-official.js?v=auto-settle-1";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord } from "./tclk-official.js?v=scan-2";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -920,6 +920,11 @@ async function readOfferHistory() {
   if (!response.ok) throw new Error(`Technocore offer history read failed (${response.status})`);
   return response.text();
 }
+async function readOfferTail() {
+  const response = await fetch(`https://technocore.chat/r/${OFFER_ROOM}?format=json&limit=200&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+  if (!response.ok) throw new Error(`Technocore recent offers read failed (${response.status})`);
+  return response.json();
+}
 function resetPayeeUi() {
   $("#check-payee-deal").disabled = true;
   $("#discard-payee-deal").disabled = true;
@@ -937,7 +942,14 @@ function renderPayeeOffers(items) {
     const card = document.createElement("article"); card.className = "mission";
     const id = document.createElement("code"); id.textContent = `seq #${seq} · ${offer.id.slice(0, 18)}…`;
     const title = document.createElement("h2"); title.textContent = `${offer.job.proto.toUpperCase()} · ${offer.job.id}`;
-    const detail = document.createElement("p"); detail.textContent = `${offer.amount} ${offer.asset} · hash lock · expires ${new Date(offer.expiresMs).toLocaleString()}\n${spec.bound ? "HASH-BOUND JOB NOTE" : "SNAPSHOTTED STANDARD JOB NOTE"}\n${spec.text.slice(0, 600)}`;
+    const remaining = (deadline) => {
+      const minutes = Math.max(0, Math.floor((deadline - Date.now()) / 60_000));
+      if (minutes < 60) return `${minutes}m`;
+      const hours = Math.floor(minutes / 60); const rest = minutes % 60;
+      return `${hours}h ${rest}m`;
+    };
+    const noteKind = spec.bound ? "HASH-BOUND JOB NOTE" : spec.declared ? "SELF-HASHED SNAPSHOT" : "SNAPSHOTTED JOB NOTE";
+    const detail = document.createElement("p"); detail.textContent = `${offer.amount} ${offer.asset} · hash lock\nAccept left: ${remaining(offer.expiresMs)} · Finish left: ${remaining(offer.claimByMs)}\n${noteKind}\n${spec.text.slice(0, 900)}`;
     const link = document.createElement("a"); link.href = contextUrl(offer.job.context); link.target = "_blank"; link.rel = "noopener noreferrer"; link.textContent = "REVIEW JOB CONTEXT ↗";
     const accept = document.createElement("button"); accept.textContent = "ACCEPT WITH MY DID →";
     accept.addEventListener("click", () => acceptPaperOffer(offer, spec));
@@ -945,19 +957,33 @@ function renderPayeeOffers(items) {
   }) : [document.createTextNode("No safe, signed, unexpired PaperRail offers found.")]));
 }
 
+async function verifyPaperOffers(offers) {
+  const checked = await Promise.all(offers.map(async (candidate) => {
+    try {
+      const specResponse = await fetch(`${contextUrl(candidate.offer.job.context)}?n=${Date.now()}`, { cache: "no-store" });
+      if (!specResponse.ok) return null;
+      const spec = await reviewJobSpec(await specResponse.text(), candidate.offer);
+      return spec ? { ...candidate, spec } : null;
+    } catch { return null; }
+  }));
+  return checked.filter(Boolean);
+}
+
 $("#scan-offers").addEventListener("click", async () => {
   const identity = readIdentity(); if (!identity) { notice("Restore the existing DID before scanning offers"); return; }
+  const button = $("#scan-offers"); button.disabled = true;
   try {
-    const offers = await listSafePaperOffers(await readOfferHistory(), identity.did);
-    const verified = [];
-    for (const candidate of offers) {
-      const specResponse = await fetch(`${contextUrl(candidate.offer.job.context)}?n=${Date.now()}`);
-      if (!specResponse.ok) continue;
-      const spec = await reviewJobSpec(await specResponse.text(), candidate.offer);
-      if (spec) verified.push({ ...candidate, spec });
+    $("#payee-candidates").textContent = "Scanning the latest 200 signed records…";
+    notice("Fast PAPER scan running");
+    let verified = await verifyPaperOffers(await listSafePaperOffers(await readOfferTail(), identity.did));
+    if (!verified.length) {
+      $("#payee-candidates").textContent = "No current offer in the fast scan. Searching the full retained history…";
+      notice("Fast scan found none; full retained-history scan running");
+      verified = await verifyPaperOffers(await listSafePaperOffers(await readOfferHistory(), identity.did));
     }
-    renderPayeeOffers(verified); notice(`${verified.length} signed offer${verified.length === 1 ? "" : "s"} with a hash-bound safe job found`);
+    renderPayeeOffers(verified); notice(`${verified.length} signed, unexpired PAPER offer${verified.length === 1 ? "" : "s"} passed the safety checks`);
   } catch (error) { $("#payee-status").textContent = `Scan failed: ${error.message}`; }
+  finally { button.disabled = false; }
 });
 
 async function acceptPaperOffer(offer, jobSnapshot) {

@@ -120,6 +120,13 @@ test("keeps payee secrets browser-local and requires explicit reveal approval", 
   assert.doesNotMatch(source, /localStorage\.setItem\([^\n]+prepared\.secret/);
 });
 
+test("scans recent PAPER offers first and falls back to retained history", () => {
+  assert.match(source, /format=json&limit=200/);
+  assert.match(source, /Scanning the latest 200 signed records/);
+  assert.match(source, /full retained history/);
+  assert.match(source, /verifyPaperOffers/);
+});
+
 test("reserves the derived room before publishing a payee accept", () => {
   assert.match(source, /room-reservation-pending/);
   assert.match(source, /verifyExactFrameRecord/);

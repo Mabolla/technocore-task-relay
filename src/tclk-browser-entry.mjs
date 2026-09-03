@@ -242,9 +242,9 @@ export async function listSafePaperOffers(raw, myDid, now = Date.now()) {
   for (const { record, frame } of decoded) {
     if (frame?.type !== "offer" || frame.from === myDid || frame.role !== "payer") continue;
     if (frame.asset !== "PAPER" || frame.lock !== "hash" || !frame.rails.includes("paper")) continue;
-    // Leave enough time for a human to review the evidence, accept, complete the
-    // work, and reveal. Near-expiry offers create rushed, low-quality activity.
-    if (!frame.job?.id || !frame.job.context || frame.expiresMs <= now + 10 * 60_000 || frame.claimByMs <= now + 30 * 60_000) continue;
+    // Surface every still-actionable offer. The UI shows both remaining windows
+    // so the human can decide whether the specific job fits the available time.
+    if (!frame.job?.id || !frame.job.context || frame.expiresMs <= now || frame.claimByMs <= now) continue;
     const safeContext = frame.job.context.startsWith("https://technocore.chat/") || /^\/kv\/[a-z0-9][a-z0-9_-]{0,47}\/[a-z0-9][a-z0-9_-]{0,47}$/.test(frame.job.context);
     if (!safeContext) continue;
     if (record.from !== frame.from || !(await validTransportSignature(record, OFFER_ROOM))) continue;
@@ -282,20 +282,35 @@ async function sha256Hex(text) {
 
 function safeJobText(text) {
   const dangerousRequest = /(?:^|[.!?]\s*)(?:send|provide|share|upload|enter|reveal)\b[^.!?]{0,80}\b(?:secret|password|credential|private key|seed phrase|wallet|payment|real funds)\b/i;
-  const realValueRequest = /(?:^|[.!?]\s*)(?:pay|transfer)\b[^.!?]{0,80}\b(?:fund|funds|usd|usdc|eth|flop|wallet)\b/i;
+  const realValueRequest = /\b(?:pay|transfer|approve|mint|swap|bridge|stake|deposit|withdraw|connect)\b[^.!?]{0,100}\b(?:fund|funds|usd|usdc|eth|flop|token|wallet|transaction)\b/i;
   const codeExecution = /\b(?:run|execute|install)\b[^.!?]{0,60}\b(?:code|script|command|package|binary)\b/i;
-  const externalLink = [...text.matchAll(/https?:\/\/[^\s]+/gi)].some(([url]) => {
-    try { return new URL(url).hostname !== "technocore.chat"; } catch { return true; }
+  const writeAction = /\b(?:post|publish|submit|upload|message|email|comment|reply|edit|delete|register|sign in|log in)\b[^.!?]{0,100}\b(?:account|form|issue|pull request|message|comment|file|credentials?)\b/i;
+  const downloadAction = /\b(?:download|install)\b[^.!?]{0,80}\b(?:file|package|app|extension|binary|script|software)\b/i;
+  const unsafeUrl = [...text.matchAll(/https?:\/\/[^\s<>()]+/gi)].some(([raw]) => {
+    try {
+      const url = new URL(raw.replace(/[.,;:!?]+$/, ""));
+      if (url.protocol !== "https:" || url.username || url.password) return true;
+      const host = url.hostname.toLowerCase();
+      if (host === "localhost" || host.endsWith(".local") || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host)) return true;
+      for (const key of url.searchParams.keys()) if (/token|secret|password|credential|auth|signature|api[_-]?key/i.test(key)) return true;
+      return false;
+    } catch { return true; }
   });
-  return !dangerousRequest.test(text) && !realValueRequest.test(text) && !codeExecution.test(text) && !externalLink;
+  return !dangerousRequest.test(text) && !realValueRequest.test(text) && !codeExecution.test(text) && !writeAction.test(text) && !downloadAction.test(text) && !unsafeUrl;
 }
 
 export async function reviewJobSpec(raw, offer) {
   const bound = await verifyBoundJobSpec(raw, offer);
   if (bound) return { ...bound, bound: true };
   const text = String(raw).split("\n").filter((line) => !line.startsWith("!!") && line.trim()).join("\n").trim();
-  if (text.startsWith("job-spec-v1 ") || text.length < 20 || text.length > 2000 || !safeJobText(text)) return null;
-  return { hash: await sha256Hex(text), text, bound: false };
+  if (text.length < 20 || text.length > 5000) return null;
+  if (text.startsWith("job-spec-v1 ")) {
+    const declared = text.match(/^job-spec-v1 sha256=([0-9a-f]{64}) \| (.+)$/s);
+    if (!declared || await sha256Hex(declared[2]) !== declared[1] || !safeJobText(declared[2])) return null;
+    return { hash: declared[1], text: declared[2], bound: false, declared: true };
+  }
+  if (!safeJobText(text)) return null;
+  return { hash: await sha256Hex(text), text, bound: false, declared: false };
 }
 
 export function makePayeeAcceptance(offer, from) {
