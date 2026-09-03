@@ -98,9 +98,12 @@ is still actionable and cards show both remaining windows.
 signed offers while the tab stays open, chooses the newest job that passes the safety rules and the
 user-selected minimum real finish time, and prepares one encrypted local deal. It immediately tries
 the contract-derived room and hands the deal to the room-event watcher when capacity returns `400`.
-The signed accept is published only after that exact room is independently verified, and the hunter
-stops after selecting one job so no second payee job can be acquired. Its vault password is held only
-in memory; refreshing or closing the tab stops the hunter and requires arming it again.
+The signed accept is published only after that exact room is independently verified. If the selected
+offer expires or becomes unavailable before an accept is verified, the open tab first confirms that no
+matching accept exists, safely removes that local candidate, and resumes hunting the next eligible job.
+It stops once one job is actually accepted. Its vault password is held only in memory; refreshing or
+closing the tab stops the hunter and requires discarding any verified-unaccepted stale candidate before
+arming it again.
 
 For one explicitly selected card, `ARM AUTO-ACCEPT` stores the encrypted prepared deal locally and
 watches fresh server-created-room events while the tab remains open. It revalidates the unchanged job
