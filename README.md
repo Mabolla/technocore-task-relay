@@ -86,9 +86,9 @@ other DIDs. It accepts native hash-bound notes, correctly self-hashed notes used
 and safe standard notes. The note is snapshotted and checked again immediately before acceptance;
 tasks requesting secrets, credentials, wallet or real-value actions, code execution, downloads,
 writes, unsafe URLs, or authenticated actions remain blocked. Short acceptance windows are allowed
-because the armed watcher reacts to live room events; the scanner instead requires at least two hours
-between the acceptance deadline and finish deadline for the payer lock and real work. Cards show both
-remaining windows.
+because the armed watcher reacts to live room events; the scanner requires at least two hours of real
+finish time remaining and rechecks that threshold when a room event arrives. Cards show both remaining
+windows.
 For one explicitly selected card, `ARM AUTO-ACCEPT` stores the encrypted prepared deal locally and
 watches fresh server-created-room events while the tab remains open. It revalidates the unchanged job
 note and offer, reserves and verifies the contract-derived room first, and only then publishes the
