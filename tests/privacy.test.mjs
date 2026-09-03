@@ -246,6 +246,7 @@ test("manual payer settlement requires a signed delivery and blocks duplicate re
   assert.match(source, /Terminal receipt already exists at seq/);
   assert.match(source, /no duplicate was published/);
   assert.match(source, /Approve this exact signed delivery manually/);
+  assert.match(source, /\$\("#approve-payer-delivery"\)\?\.addEventListener/);
 });
 
 test("refunds an expired locked payer deal before issuing its terminal receipt", () => {
