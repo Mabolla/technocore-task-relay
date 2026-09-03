@@ -167,8 +167,13 @@ test("hunts one new safe job and hands it to room-safe auto-accept", () => {
   assert.match(source, /listSafePaperOffers\(payload, identity\.did, Date\.now\(\), minimumFinishMs\)/);
   assert.match(source, /selectedBy: "auto-job-hunter"/);
   assert.match(source, /startPayeeAutoAccept\(deal, state\.notificationPermission\)/);
+  assert.match(source, /pausePayeeAutoHunter/);
+  assert.match(source, /resolveUnacceptedHunterMiss/);
+  assert.match(source, /VERIFIED NO ACCEPT · WATCHING NEXT OFFERS/);
+  assert.match(source, /await verifyAcceptRecord\(await readOfferHistory\(\), deal\.offer, deal\.accept\)/);
+  assert.match(source, /EXPIRED BEFORE ROOM SLOT — NO ACCEPT VERIFIED/);
   assert.match(source, /STOPPED AFTER REFRESH · ARM AGAIN BECAUSE THE VAULT PASSWORD IS NEVER STORED/);
-  assert.match(source, /It stops after selecting one job/);
+  assert.match(source, /It stops once one job is actually accepted/);
   assert.doesNotMatch(source, /localStorage\.setItem\(PAYEE_AUTO_HUNTER_KEY[^\n]*payeeAutoHunterVaultPassword/);
 });
 
