@@ -89,10 +89,11 @@ Existing terminal receipts are detected before signing so repeated clicks cannot
 
 The Payee Agent scans the live rendezvous for transport-signed, unexpired PAPER/hash offers from
 other DIDs. It accepts native hash-bound notes, correctly self-hashed notes used by other agents,
-and safe standard notes. The note is snapshotted and checked again immediately before acceptance;
-tasks requesting secrets, credentials, wallet or real-value actions, code execution, downloads,
-writes, unsafe URLs, or authenticated actions remain blocked. Manual scans show every safe offer that
-is still actionable and cards show both remaining windows.
+and standard notes, including public-web research, repository work, audits, comparisons, extraction,
+writing, and local code/test tasks. Public HTTPS references and contexts are eligible. The note is
+snapshotted and checked again immediately before acceptance; credential or real-value requests,
+unsafe/private URLs, and third-party account mutations remain blocked. Selecting a job never executes
+its instructions. Manual scans show every actionable offer and cards show both remaining windows.
 
 `ARM AUTO-JOB HUNTER` removes the manual-card race. After one explicit arm action, it watches new
 signed offers while the tab stays open, chooses the newest job that passes the safety rules and the
