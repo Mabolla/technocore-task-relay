@@ -7,6 +7,7 @@ const EVENTS_KEY = "mabolla.task-relay.events.v1";
 const TCLK_OFFER_KEY = "mabolla.task-relay.tclk-offer.v1";
 const TCLK_JOB_KEY = "mabolla.task-relay.tclk-job.v1";
 const TCLK_PAYER_DEAL_KEY = "mabolla.task-relay.tclk-payer-deal.v1";
+const TCLK_PAYER_DEALS_KEY = "mabolla.task-relay.tclk-payer-deals.v1";
 const PAYEE_DEAL_KEY = "mabolla.task-relay.tclk-payee-deal.v1";
 const TRACK_RECORD_KEY = "mabolla.task-relay.tclk-track-record.v1";
 const CREATOR_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
@@ -96,6 +97,20 @@ function signedUrl(room, identity, signature, nonce, text) {
 const readIdentity = () => { try { return JSON.parse(localStorage.getItem(IDENTITY_KEY)); } catch { return null; } };
 const readEvents = () => { try { return JSON.parse(localStorage.getItem(EVENTS_KEY)) || []; } catch { return []; } };
 const readPayerDeal = () => { try { return JSON.parse(localStorage.getItem(TCLK_PAYER_DEAL_KEY)); } catch { return null; } };
+const readPayerDeals = () => { try { return JSON.parse(localStorage.getItem(TCLK_PAYER_DEALS_KEY)) || {}; } catch { return {}; } };
+
+function rememberPayerDeal(deal) {
+  const contract = deal?.accept?.contract;
+  if (!contract) return;
+  const deals = readPayerDeals();
+  deals[contract] = deal;
+  localStorage.setItem(TCLK_PAYER_DEALS_KEY, JSON.stringify(deals));
+}
+
+function saveActivePayerDeal(deal) {
+  localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify(deal));
+  rememberPayerDeal(deal);
+}
 
 function renderPayerDeal() {
   const deal = readPayerDeal();
@@ -122,7 +137,8 @@ function renderPayerDeal() {
       : state === "locked" && rail === "locked" && Date.now() >= deal.offer.refundAfterMs
         ? "NEXT: The deadline passed without reveal. Refund the expired deal."
       : "NEXT: Wait for the payee's signed result/reveal, then press VERIFY LOCK / CHECK RESULT.";
-  $("#payer-deal-status").textContent = `Contract: ${deal.accept.contract}\nCounterparty: ${deal.accept.from}\nDeal room: /r/${deal.lock.room}\nTranscript state: ${state}\nPaperRail state: ${rail}\n${next}`;
+  const seqs = deal.offerSeq || deal.acceptSeq ? `\nVerified chain: OFFER #${deal.offerSeq ?? "?"} → ACCEPT #${deal.acceptSeq ?? "?"}` : "";
+  $("#payer-deal-status").textContent = `Contract: ${deal.accept.contract}\nCounterparty: ${deal.accept.from}\nDeal room: /r/${deal.lock.room}${seqs}\nTranscript state: ${state}\nPaperRail state: ${rail}\n${next}`;
 }
 const agentNameOf = (identity) => identity?.agentName || (identity?.did === CREATOR_DID ? "Mabolla Agent" : "Task Relay Agent");
 const initialsOf = (name) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "TR";
@@ -446,7 +462,7 @@ $("#check-tclk").addEventListener("click", async () => {
     if (!found) { $("#tclk-live-result").textContent = `Offer ${offer.id}\nNo protocol-valid independent accept yet.`; return; }
     const lock = makePaperLock(offer, found.accept, offer.from);
     localStorage.setItem(`${TCLK_OFFER_KEY}.accept`, JSON.stringify(found.accept));
-    localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify({ offer, accept: found.accept, acceptSeq: found.seq, lock }));
+    saveActivePayerDeal({ offer, accept: found.accept, acceptSeq: found.seq, lock });
     $("#create-paper-lock").disabled = false;
     $("#publish-payer-lock").disabled = true;
     $("#tclk-live-result").textContent = `VALID ACCEPT\nCounterparty: ${found.accept.from}\nContract: ${found.contract}\nDeal room: /r/${found.room}\n\nNext payer frame prepared:\n${lock.line}`;
@@ -463,7 +479,7 @@ $("#create-paper-lock").addEventListener("click", async () => {
     if (current.ok) {
       if (stripNoteBanner(await current.text()) !== deal.lock.value) throw new Error("PaperRail note already exists with different terms");
       deal.railState = "locked";
-      localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify(deal));
+      saveActivePayerDeal(deal);
       $("#publish-payer-lock").disabled = false;
       renderPayerDeal();
       notice("Exact PaperRail lock already exists and is ready to verify");
@@ -490,7 +506,7 @@ $("#publish-payer-lock").addEventListener("click", async () => {
     window.open(signedUrl(deal.lock.room, identity, signature, nonce, deal.lock.line), "_blank", "noopener,noreferrer");
     $("#tclk-live-result").textContent = `SIGNED LOCK SUBMISSION OPENED — NOT YET VERIFIED ON TECHNOCORE\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.lock.room}\nPaper note: /kv/${deal.lock.note.ns}/${deal.lock.note.key}\n\n${deal.lock.line}\n\nNEXT: Confirm the opened Technocore tab says ok, then press VERIFY LOCK / CHECK RESULT. If it says 400, the signed lock was not published.`;
     deal.state = "lock-submission-opened"; deal.railState = "locked"; deal.lockSubmittedAt = new Date().toISOString();
-    localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify(deal));
+    saveActivePayerDeal(deal);
     renderPayerDeal();
     notice("Signed payer lock opened for Technocore confirmation");
   } catch (error) { $("#tclk-live-result").textContent = `Lock publication blocked: ${error.message}`; }
@@ -512,7 +528,7 @@ $("#check-payer-deal").addEventListener("click", async () => {
     const noteResponse = await fetch(`https://technocore.chat/kv/${expected.note.ns}/${expected.note.key}?n=${Date.now()}`);
     if (noteResponse.ok) railState = classifyPaperRecord(stripNoteBanner(await noteResponse.text()), deal.offer, deal.accept);
     deal.state = folded.state.status; deal.railState = railState; deal.checkedAt = new Date().toISOString();
-    localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify(deal));
+    saveActivePayerDeal(deal);
     renderPayerDeal();
     notice(folded.state.status === "claimed" ? "Valid payee reveal found" : "No valid payee reveal yet");
     void syncTrackRecord({ announce: false });
@@ -531,7 +547,7 @@ $("#publish-payer-receipt").addEventListener("click", async () => {
   const nonce = Date.now(); const signature = await sign(identity, receipt.room, nonce, receipt.line);
   window.open(signedUrl(receipt.room, identity, signature, nonce, receipt.line), "_blank", "noopener,noreferrer");
   deal.receiptSubmittedAt = new Date().toISOString();
-  localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify(deal));
+  saveActivePayerDeal(deal);
   renderPayerDeal();
   notice("Payer receipt opened for Technocore confirmation");
 });
@@ -555,7 +571,7 @@ $("#refund-payer-deal").addEventListener("click", async () => {
     const nonce = Date.now(); const signature = await sign(identity, refund.room, nonce, refund.line);
     window.open(signedUrl(refund.room, identity, signature, nonce, refund.line), "_blank", "noopener,noreferrer");
     deal.railState = "refunded"; deal.refundSubmittedAt = new Date().toISOString();
-    localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify(deal));
+    saveActivePayerDeal(deal);
     renderPayerDeal();
     notice("PaperRail refunded; confirm the signed refund on Technocore, then check the deal");
   } catch (error) { $("#payer-deal-status").textContent = `${error.message}\nSaved deal data was preserved.`; }
@@ -646,6 +662,30 @@ function statusLabel(entry) {
   return String(entry.status || "unknown").toUpperCase();
 }
 
+function resumePayerDeal(entry) {
+  if (entry.role !== "payer" || !entry.accept || !entry.contract) return;
+  const current = readPayerDeal();
+  if (current) rememberPayerDeal(current);
+  const saved = readPayerDeals()[entry.contract];
+  const deal = saved || {
+    offer: entry.offer,
+    offerSeq: entry.offerSeq,
+    accept: entry.accept,
+    acceptSeq: entry.acceptSeq,
+    lock: makePaperLock(entry.offer, entry.accept, entry.offer.from),
+    state: entry.status === "locked" ? "locked" : "accepted",
+    railState: entry.status === "locked" ? "check required" : undefined,
+  };
+  deal.offerSeq ??= entry.offerSeq;
+  deal.acceptSeq ??= entry.acceptSeq;
+  saveActivePayerDeal(deal);
+  $("#create-paper-lock").disabled = false;
+  $("#publish-payer-lock").disabled = !(deal.railState === "locked" && deal.state !== "locked");
+  renderPayerDeal();
+  document.querySelector("#payer-deal-status").scrollIntoView({ behavior: "smooth", block: "center" });
+  notice(`Payer deal restored: OFFER #${entry.offerSeq ?? "?"} → ACCEPT #${entry.acceptSeq ?? "?"}`);
+}
+
 function renderTrackRecord() {
   const entries = readTrackRecords();
   $("#track-given").textContent = entries.filter((entry) => entry.role === "payer").length;
@@ -667,7 +707,16 @@ function renderTrackRecord() {
     const seqOrder = [["offer", "OFFER"], ["accept", "ACCEPT"], ["lock", "LOCK"], ["reveal", "REVEAL"], ["refund", "REFUND"], ["cancel", "CANCEL"], ["receipt", "RECEIPT"]];
     const parts = seqOrder.filter(([type]) => entry.seqs?.[type] != null).map(([type, label]) => `${label} #${entry.seqs[type]}`);
     chain.textContent = parts.length ? parts.join(" → ") : "No verified seq";
-    const status = document.createElement("td"); status.textContent = statusLabel(entry);
+    const status = document.createElement("td");
+    const label = document.createElement("div"); label.textContent = statusLabel(entry); status.append(label);
+    if (entry.role === "payer" && entry.accept && ["accepted", "locked"].includes(entry.status)) {
+      const resume = document.createElement("button");
+      const expired = entry.offer.refundAfterMs <= Date.now();
+      resume.textContent = expired ? "PAST REFUND WINDOW" : "RESUME DEAL";
+      resume.disabled = expired;
+      if (!expired) resume.addEventListener("click", () => resumePayerDeal(entry));
+      status.append(resume);
+    }
     row.append(role, job, chain, status); return row;
   }));
 }
@@ -842,6 +891,7 @@ $("#audit-tclk").addEventListener("click", async () => {
 });
 
 render();
+if (readPayerDeal()) rememberPayerDeal(readPayerDeal());
 if (localStorage.getItem(TCLK_OFFER_KEY)) { $("#check-tclk").disabled = false; }
 if (localStorage.getItem(TCLK_PAYER_DEAL_KEY)) { $("#create-paper-lock").disabled = false; }
 renderPayerDeal();

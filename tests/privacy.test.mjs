@@ -164,6 +164,15 @@ test("does not report an opened signed-lock tab as a verified lock", () => {
   assert.doesNotMatch(source, /deal\.state = "lock-submitted"/);
 });
 
+test("restores any accepted payer deal from verified history without losing the current deal", () => {
+  assert.match(source, /TCLK_PAYER_DEALS_KEY/);
+  assert.match(source, /rememberPayerDeal\(current\)/);
+  assert.match(source, /function resumePayerDeal\(entry\)/);
+  assert.match(source, /RESUME DEAL/);
+  assert.match(source, /OFFER #\$\{entry\.offerSeq/);
+  assert.match(source, /ACCEPT #\$\{entry\.acceptSeq/);
+});
+
 test("refunds an expired locked payer deal before issuing its terminal receipt", () => {
   assert.match(source, /REFUND EXPIRED DEAL/);
   assert.match(source, /Date\.now\(\) >= deal\.offer\.refundAfterMs/);
