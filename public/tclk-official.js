@@ -3485,6 +3485,54 @@ async function foldPayeeDeal(raw, offer, accept, now = Date.now()) {
   }
   return { state, applied, room };
 }
+async function listSignedDeliveries(raw, accept) {
+  const room = dealRoom(accept.contract);
+  const deliveries = [];
+  for (const record of records(raw)) {
+    if (record.from !== accept.from || tryDecodeFrame(record.text || "")) continue;
+    if (!await validTransportSignature(record, room)) continue;
+    const text = String(record.text || "").replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, " ").replace(/\s+/g, " ").trim();
+    if (text.length < 20 || text.length > 4096) continue;
+    deliveries.push({ seq: record.seq ?? null, ts: record.ts ?? null, text });
+  }
+  return deliveries.sort((left, right) => Number(left.seq || 0) - Number(right.seq || 0));
+}
+function countMatches(text, expression) {
+  return [...text.matchAll(expression)].length;
+}
+function evaluateObjectiveDelivery(jobText, deliveryText, offer) {
+  const job = String(jobText || "").replace(/\s+/g, " ").trim();
+  const delivery = String(deliveryText || "").replace(/\s+/g, " ").trim();
+  const level = job.match(/^difficulty=(easy|medium|hard)\./i)?.[1]?.toLowerCase();
+  if (!level) return { ok: false, reason: "This job has no supported deterministic validator" };
+  if (/\bFAIL\b/i.test(delivery)) return { ok: false, reason: "Delivery reports a failed check" };
+  const range = job.match(/(?:deliverable=.*?)\b(\d{2,4})\s*[-–]\s*(\d{2,4})\s+characters\b/i);
+  if (range && (delivery.length < Number(range[1]) || delivery.length > Number(range[2]))) {
+    return { ok: false, reason: `Delivery must be ${range[1]}-${range[2]} characters` };
+  }
+  const hash = offer?.job?.id?.match(/([0-9a-f]{64})$/i)?.[1]?.toLowerCase();
+  if (hash && !delivery.toLowerCase().includes(hash)) return { ok: false, reason: "Exact job hash is missing" };
+  if (/signer DID/i.test(job) && offer?.from && !delivery.includes(offer.from)) return { ok: false, reason: "Exact signer DID is missing" };
+  if (/asset|paper-only|paper only/i.test(job) && !/\bPAPER\b/i.test(delivery)) return { ok: false, reason: "PAPER asset/rail result is missing" };
+  if (/signature/i.test(job) && !/(?:signature|ed25519)[^.!?]{0,40}(?:valid|pass|true)|(?:valid|pass|true)[^.!?]{0,40}(?:signature|ed25519)/i.test(delivery)) {
+    return { ok: false, reason: "A passing signature result is missing" };
+  }
+  if (level === "easy") {
+    if (!/\bPASS\b/i.test(delivery)) return { ok: false, reason: "PASS result is missing" };
+    return { ok: true, reason: "Easy template checks passed" };
+  }
+  if (level === "medium") {
+    if (countMatches(delivery, /\bPASS\b/gi) < 4) return { ok: false, reason: "Four explicit PASS checks are required" };
+    if (!/(?:expiresMs|expires)[^.!?]{0,80}(?:claimByMs|claim)[^.!?]{0,80}(?:refundAfterMs|refund)/i.test(delivery)) {
+      return { ok: false, reason: "Deadline-order evidence is missing" };
+    }
+    return { ok: true, reason: "Medium template checks passed" };
+  }
+  const hardFields = ["jobHash", "signerDid", "signatureValid", "canonicalFrame", "paperOnly", "deadlineOrder", "overall"];
+  for (const field of hardFields) if (!new RegExp(`["']?${field}["']?\\s*[:=]`, "i").test(delivery)) return { ok: false, reason: `${field} is missing` };
+  if (!/[\"']?overall[\"']?\s*[:=]\s*(?:true|[\"']PASS[\"'])/i.test(delivery)) return { ok: false, reason: "Overall result is not PASS/true" };
+  return { ok: true, reason: "Hard template checks passed" };
+}
 function expectedPaperLock(offer, accept) {
   const note = paperNote(accept.contract);
   return { note, ref: accept.contract, value: `tclkpaper1 locked ${offer.lock} ${accept.statement} ${offer.refundAfterMs}` };
@@ -3536,6 +3584,7 @@ export {
   SIMPLE_VERIFICATION_JOB,
   classifyPaperRecord,
   encodeFrame,
+  evaluateObjectiveDelivery,
   expectedPaperClaim,
   expectedPaperLock,
   expectedPaperRefund,
@@ -3543,6 +3592,7 @@ export {
   foldPayeeDeal,
   listMyPaperActivity,
   listSafePaperOffers,
+  listSignedDeliveries,
   makeJobOffer,
   makeLivePaperOffer,
   makePaperLock,

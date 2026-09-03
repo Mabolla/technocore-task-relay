@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord } from "./tclk-official.js";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord } from "./tclk-official.js?v=auto-settle-1";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -9,6 +9,7 @@ const TCLK_JOB_KEY = "mabolla.task-relay.tclk-job.v1";
 const TCLK_PAYER_DEAL_KEY = "mabolla.task-relay.tclk-payer-deal.v1";
 const TCLK_PAYER_DEALS_KEY = "mabolla.task-relay.tclk-payer-deals.v1";
 const PAYER_AUTOPILOT_KEY = "mabolla.task-relay.payer-autopilot.v1";
+const PAYER_AUTO_SETTLE_KEY = "mabolla.task-relay.payer-auto-settle.v1";
 const PAYEE_DEAL_KEY = "mabolla.task-relay.tclk-payee-deal.v1";
 const TRACK_RECORD_KEY = "mabolla.task-relay.tclk-track-record.v1";
 const CREATOR_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
@@ -100,7 +101,9 @@ const readEvents = () => { try { return JSON.parse(localStorage.getItem(EVENTS_K
 const readPayerDeal = () => { try { return JSON.parse(localStorage.getItem(TCLK_PAYER_DEAL_KEY)); } catch { return null; } };
 const readPayerDeals = () => { try { return JSON.parse(localStorage.getItem(TCLK_PAYER_DEALS_KEY)) || {}; } catch { return {}; } };
 const readPayerAutopilot = () => { try { return JSON.parse(localStorage.getItem(PAYER_AUTOPILOT_KEY)) || { armed: false }; } catch { return { armed: false }; } };
+const readPayerAutoSettle = () => { try { return JSON.parse(localStorage.getItem(PAYER_AUTO_SETTLE_KEY)) || { armed: false }; } catch { return { armed: false }; } };
 let payerAutopilotRunning = false;
+let payerAutoSettleRunning = false;
 
 function rememberPayerDeal(deal) {
   const contract = deal?.accept?.contract;
@@ -260,6 +263,189 @@ async function runPayerAutopilot() {
   } finally {
     if (!readPayerAutopilot().armed) payerAutopilotRunning = false;
   }
+}
+
+function autoSettleDeals() {
+  const active = readPayerDeal();
+  if (active) rememberPayerDeal(active);
+  return Object.values(readPayerDeals())
+    .filter((deal) => deal?.offer && deal?.accept && deal?.lock)
+    .filter((deal) => ["locked", "claimed", "refunded"].includes(deal.state))
+    .filter((deal) => !deal.receiptVerifiedAt);
+}
+
+function payerDealLabel(deal) {
+  return deal.offerSeq ? `OFFER #${deal.offerSeq}` : `${deal.accept.contract.slice(0, 14)}…`;
+}
+
+function renderPayerAutoSettle() {
+  const state = readPayerAutoSettle();
+  const deals = Object.values(readPayerDeals()).filter((deal) => deal?.accept?.contract && ["locked", "claimed", "refunded"].includes(deal.state));
+  $("#payer-auto-settle").textContent = state.armed ? "STOP SAFE AUTO-SETTLE" : "ARM SAFE AUTO-SETTLE";
+  $("#payer-auto-settle-status").textContent = `${state.armed ? "ARMED · TAB MUST STAY OPEN" : "OFF"}\n${deals.length ? deals.map((deal) => {
+    const status = deal.receiptVerifiedAt ? "TERMINAL RECEIPT VERIFIED" : deal.autoSettleStatus || (deal.state === "locked" ? "WAITING FOR SIGNED DELIVERY / REVEAL" : "CHECKING TERMINAL STATE");
+    return `${payerDealLabel(deal)}: ${status}`;
+  }).join("\n") : "No locked payer deals saved."}${state.armed ? `\nPending: ${autoSettleDeals().length} · checking every 30 seconds` : ""}`;
+}
+
+function notifyAutoSettle(deal, key, title, body) {
+  const state = readPayerAutoSettle();
+  state.notified = state.notified || {};
+  const id = `${deal.accept.contract}:${key}`;
+  if (state.notified[id]) return;
+  state.notified[id] = new Date().toISOString();
+  localStorage.setItem(PAYER_AUTO_SETTLE_KEY, JSON.stringify(state));
+  notice(`${title}: ${body}`);
+  if ("Notification" in window && Notification.permission === "granted") new Notification(title, { body });
+}
+
+async function readJobForAutoSettle(deal) {
+  const url = contextUrl(deal.offer.job.context);
+  if (!url.startsWith("https://technocore.chat/")) return null;
+  const response = await fetch(`${url}${url.includes("?") ? "&" : "?"}n=${Date.now()}`, { cache: "no-store" });
+  if (!response.ok) return null;
+  return reviewJobSpec(await response.text(), deal.offer);
+}
+
+async function publishVerifiedPayerReceipt(deal, roomPayload, outcome) {
+  const identity = readIdentity();
+  if (!identity || identity.did !== deal.offer.from) throw new Error("Local DID does not match the payer");
+  const receipt = makePayeeReceipt(deal.accept, identity.did, outcome);
+  const existing = await verifyExactFrameRecord(roomPayload, receipt.frame, receipt.room);
+  if (existing) {
+    deal.receiptSeq = existing.seq;
+    deal.receiptVerifiedAt = new Date().toISOString();
+    deal.autoSettleStatus = `TERMINAL RECEIPT VERIFIED · seq #${existing.seq ?? "?"}`;
+    updateStoredPayerDeal(deal);
+    return true;
+  }
+  if (deal.receiptPublishReturnedOkAt && Date.now() - Date.parse(deal.receiptPublishReturnedOkAt) < 60_000) {
+    deal.autoSettleStatus = "RECEIPT RETURNED OK · VERIFYING TRANSCRIPT";
+    updateStoredPayerDeal(deal);
+    return false;
+  }
+  const nonce = Date.now();
+  const signature = await sign(identity, receipt.room, nonce, receipt.line);
+  const response = await fetch(signedUrl(receipt.room, identity, signature, nonce, receipt.line), { cache: "no-store" });
+  const result = clean(await response.text());
+  if (!response.ok && response.status !== 422) throw new Error(`Terminal receipt rejected (${response.status}${result ? `: ${result.slice(0, 120)}` : ""})`);
+  deal.receiptPublishReturnedOkAt = new Date().toISOString();
+  updateStoredPayerDeal(deal);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 500));
+    const check = await fetch(`https://technocore.chat/r/${receipt.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+    if (!check.ok) continue;
+    const verified = await verifyExactFrameRecord(await check.json(), receipt.frame, receipt.room);
+    if (verified) {
+      deal.receiptSeq = verified.seq;
+      deal.receiptVerifiedAt = new Date().toISOString();
+      deal.autoSettleStatus = `TERMINAL RECEIPT VERIFIED · seq #${verified.seq ?? "?"}`;
+      updateStoredPayerDeal(deal);
+      return true;
+    }
+  }
+  deal.autoSettleStatus = "RECEIPT RETURNED OK · VERIFYING TRANSCRIPT";
+  updateStoredPayerDeal(deal);
+  return false;
+}
+
+async function inspectAndAutoSettle(deal) {
+  const roomResponse = await fetch(`https://technocore.chat/r/${deal.lock.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+  if (!roomResponse.ok) throw new Error(`Deal room read failed (${roomResponse.status})`);
+  const roomPayload = await roomResponse.json();
+  const folded = await foldPayeeDeal(roomPayload, deal.offer, deal.accept);
+  const deliveries = await listSignedDeliveries(roomPayload, deal.accept);
+  const expected = expectedPaperLock(deal.offer, deal.accept);
+  const noteResponse = await fetch(`https://technocore.chat/kv/${expected.note.ns}/${expected.note.key}?n=${Date.now()}`, { cache: "no-store" });
+  const railState = noteResponse.ok ? classifyPaperRecord(stripNoteBanner(await noteResponse.text()), deal.offer, deal.accept) : "absent";
+  deal.state = folded.state.status;
+  deal.railState = railState;
+  deal.checkedAt = new Date().toISOString();
+
+  if (folded.state.status === "locked") {
+    if (deliveries.length) {
+      const delivery = deliveries.at(-1);
+      deal.autoSettleStatus = `SIGNED DELIVERY #${delivery.seq ?? "?"} · WAITING FOR VALID REVEAL`;
+      notifyAutoSettle(deal, `delivery:${delivery.seq}`, "Technocore delivery received", `${payerDealLabel(deal)} has a signed delivery and is waiting for reveal.`);
+    } else if (Date.now() >= deal.offer.refundAfterMs) {
+      deal.autoSettleStatus = "REFUND AVAILABLE · MANUAL ACTION REQUIRED";
+      notifyAutoSettle(deal, "refund", "Technocore refund available", `${payerDealLabel(deal)} has no valid reveal. Open Task Relay to review the refund.`);
+    } else deal.autoSettleStatus = "WAITING FOR SIGNED DELIVERY / REVEAL";
+    updateStoredPayerDeal(deal);
+    return;
+  }
+
+  if (folded.state.status === "refunded") {
+    if (railState !== "refunded") {
+      deal.autoSettleStatus = "REFUND FRAME FOUND · WAITING FOR PAPER RAIL";
+      updateStoredPayerDeal(deal);
+      return;
+    }
+    await publishVerifiedPayerReceipt(deal, roomPayload, "refunded");
+    return;
+  }
+
+  if (folded.state.status !== "claimed") {
+    deal.autoSettleStatus = `TERMINAL CHECK BLOCKED · ${folded.state.status}`;
+    updateStoredPayerDeal(deal);
+    return;
+  }
+  if (railState !== "claimed") {
+    deal.autoSettleStatus = "VALID REVEAL FOUND · WAITING FOR PAPER RAIL CLAIM";
+    updateStoredPayerDeal(deal);
+    return;
+  }
+
+  const revealSeq = folded.applied.find((entry) => entry.frame.type === "reveal")?.seq;
+  const delivery = deliveries.filter((entry) => revealSeq == null || entry.seq == null || Number(entry.seq) < Number(revealSeq)).at(-1);
+  if (!delivery) {
+    deal.autoSettleStatus = "REVIEW REQUIRED · NO SIGNED DELIVERY BEFORE REVEAL";
+    updateStoredPayerDeal(deal);
+    notifyAutoSettle(deal, `review:no-delivery:${revealSeq}`, "Technocore review required", `${payerDealLabel(deal)} revealed without a signed delivery that can be auto-approved.`);
+    return;
+  }
+  const job = await readJobForAutoSettle(deal);
+  const evaluation = job ? evaluateObjectiveDelivery(job.text, delivery.text, deal.offer) : { ok: false, reason: "Job specification is not machine-verifiable" };
+  deal.deliverySeq = delivery.seq;
+  deal.deliveryPreview = delivery.text.slice(0, 500);
+  deal.deliveryEvaluation = evaluation;
+  if (!evaluation.ok) {
+    deal.autoSettleStatus = `REVIEW REQUIRED · ${evaluation.reason}`;
+    updateStoredPayerDeal(deal);
+    notifyAutoSettle(deal, `review:${delivery.seq}:${evaluation.reason}`, "Technocore review required", `${payerDealLabel(deal)} delivery needs manual review: ${evaluation.reason}.`);
+    return;
+  }
+  deal.autoSettleStatus = `OBJECTIVE DELIVERY PASSED · seq #${delivery.seq ?? "?"}`;
+  updateStoredPayerDeal(deal);
+  const published = await publishVerifiedPayerReceipt(deal, roomPayload, "claimed");
+  if (published) notifyAutoSettle(deal, `settled:${deal.receiptSeq}`, "Technocore deal finalized", `${payerDealLabel(deal)} passed deterministic checks and its terminal receipt is verified.`);
+}
+
+async function runPayerAutoSettle() {
+  if (payerAutoSettleRunning || !readPayerAutoSettle().armed) return;
+  payerAutoSettleRunning = true;
+  try {
+    while (readPayerAutoSettle().armed) {
+      const deals = autoSettleDeals();
+      for (const deal of deals) {
+        try { await inspectAndAutoSettle(deal); }
+        catch (error) {
+          deal.autoSettleStatus = `TEMPORARY ERROR · ${error.message}`;
+          updateStoredPayerDeal(deal);
+        }
+      }
+      if (deals.length && !autoSettleDeals().length) {
+        const state = readPayerAutoSettle();
+        state.armed = false;
+        state.completedAt = new Date().toISOString();
+        localStorage.setItem(PAYER_AUTO_SETTLE_KEY, JSON.stringify(state));
+        notice("All eligible payer deals have verified terminal receipts; safe auto-settle stopped");
+      }
+      renderPayerDeal();
+      renderPayerAutoSettle();
+      if (readPayerAutoSettle().armed) await new Promise((resolve) => setTimeout(resolve, 30_000));
+    }
+  } finally { payerAutoSettleRunning = false; }
 }
 
 function renderPayerDeal() {
@@ -952,6 +1138,32 @@ $("#payer-autopilot").addEventListener("click", async () => {
   } catch (error) { $("#payer-autopilot-status").textContent = `Auto-publish was not armed: ${error.message}`; }
 });
 
+$("#payer-auto-settle").addEventListener("click", async () => {
+  const current = readPayerAutoSettle();
+  if (current.armed) {
+    localStorage.setItem(PAYER_AUTO_SETTLE_KEY, JSON.stringify({ ...current, armed: false, stoppedAt: new Date().toISOString() }));
+    renderPayerAutoSettle();
+    notice("Safe auto-settle stopped locally");
+    return;
+  }
+  const deals = autoSettleDeals();
+  if (!deals.length) { notice("No locked payer deals are ready for safe auto-settle"); return; }
+  if (!window.confirm(`Arm safe auto-settle for ${deals.length} payer deal${deals.length === 1 ? "" : "s"}?\n\nWhile this tab stays open, Task Relay will verify signed deliveries, reveal, contract, hash lock, PaperRail and supported deterministic job criteria. It will publish a terminal receipt only when every check passes. Ambiguous work and refunds remain manual. The DID key stays in this browser.`)) return;
+  let notificationPermission = "unsupported";
+  if ("Notification" in window) {
+    try { notificationPermission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission; }
+    catch { notificationPermission = Notification.permission; }
+  }
+  localStorage.setItem(PAYER_AUTO_SETTLE_KEY, JSON.stringify({ armed: true, armedAt: new Date().toISOString(), notificationPermission, notified: current.notified || {} }));
+  for (const deal of deals) {
+    deal.autoSettleStatus = "ARMED · CHECKING SIGNED DELIVERY / REVEAL";
+    updateStoredPayerDeal(deal);
+  }
+  renderPayerAutoSettle();
+  notice(`${deals.length} payer deal${deals.length === 1 ? "" : "s"} armed for safe auto-settle`);
+  void runPayerAutoSettle();
+});
+
 $("#check-payee-deal").addEventListener("click", async () => {
   const deal = readPayeeDeal(); if (!deal) return;
   try {
@@ -1083,7 +1295,9 @@ if (localStorage.getItem(TCLK_PAYER_DEAL_KEY)) { $("#create-paper-lock").disable
 renderPayerDeal();
 renderTrackRecord();
 renderPayerAutopilot();
+renderPayerAutoSettle();
 if (readPayerAutopilot().armed) void runPayerAutopilot();
+if (readPayerAutoSettle().armed) void runPayerAutoSettle();
 if (readIdentity()) void syncTrackRecord({ announce: false });
 if (readPayeeDeal()) {
   const payeeDeal = readPayeeDeal();

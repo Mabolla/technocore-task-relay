@@ -185,6 +185,19 @@ test("auto-publishes saved payer locks only after a fresh server-created room ev
   assert.match(source, /All eligible payer locks are verified or expired/);
 });
 
+test("safe auto-settle fails closed before signing a terminal payer receipt", () => {
+  assert.match(source, /SAFE AUTO-SETTLE · LOCAL KEY ONLY/);
+  assert.match(source, /ARM SAFE AUTO-SETTLE/);
+  assert.match(source, /listSignedDeliveries/);
+  assert.match(source, /evaluateObjectiveDelivery/);
+  assert.match(source, /NO SIGNED DELIVERY BEFORE REVEAL/);
+  assert.match(source, /Ambiguous work and refunds remain manual/);
+  assert.match(source, /publishVerifiedPayerReceipt/);
+  assert.match(source, /identity\.did !== deal\.offer\.from/);
+  assert.match(source, /TERMINAL RECEIPT VERIFIED/);
+  assert.doesNotMatch(source, /AUTO REFUND/);
+});
+
 test("refunds an expired locked payer deal before issuing its terminal receipt", () => {
   assert.match(source, /REFUND EXPIRED DEAL/);
   assert.match(source, /Date\.now\(\) >= deal\.offer\.refundAfterMs/);

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeAccept, generateHashLock, makeOffer, verifySecret } from "@flop-labs/tclk";
-import { JOB_TEMPLATES, OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, encodeFrame, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, makeJobOffer, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerRefund, makeSimpleVerificationOffer, reviewJobSpec, summarizeDealActivity, verifyBoundJobSpec } from "../src/tclk-browser-entry.mjs";
+import { JOB_TEMPLATES, OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerRefund, makeSimpleVerificationOffer, reviewJobSpec, summarizeDealActivity, verifyBoundJobSpec } from "../src/tclk-browser-entry.mjs";
 
 const payer = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -43,6 +43,29 @@ test("builds a short hash-bound verification job that another agent can finish q
   assert.match(SIMPLE_VERIFICATION_JOB, /final 64 hex characters of offer\.job\.id/);
   assert.doesNotMatch(SIMPLE_VERIFICATION_JOB, /seq 1100/);
   assert.ok(await verifyBoundJobSpec(prepared.spec, prepared.offer));
+});
+
+test("auto-settle accepts only a signed delivery that passes a supported deterministic template", async () => {
+  const prepared = await makeSimpleVerificationOffer({ from: payer, now: 1_800_000_000_000 });
+  const job = (await verifyBoundJobSpec(prepared.spec, prepared.offer)).text;
+  const hash = prepared.offer.job.id.slice(-64);
+  const passing = `PASS ${hash} ${payer} PAPER transport signature valid. Exact job hash and signed offer binding independently match.`;
+  assert.equal(evaluateObjectiveDelivery(job, passing, prepared.offer).ok, true);
+  assert.match(evaluateObjectiveDelivery(job, passing.replace(hash, "b".repeat(64)), prepared.offer).reason, /hash is missing/);
+  assert.match(evaluateObjectiveDelivery(job, passing.replace("PASS", "FAIL"), prepared.offer).reason, /failed check/);
+  assert.match(evaluateObjectiveDelivery("Custom legacy task", passing, prepared.offer).reason, /no supported deterministic validator/);
+});
+
+test("lists only non-frame delivery text signed by the accepted payee", async () => {
+  const now = Date.now(); const payerAgent = await signer(); const payeeAgent = await signer();
+  const offer = makeOffer({ from: payerAgent.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 60_000, claimByMs: now + 3_600_000, refundAfterMs: now + 7_200_000, job: { proto: "a2a", id: "job-delivery", context: "/kv/jobs/job-delivery" } });
+  const accept = makeAccept(offer, { from: payeeAgent.did, statement: generateHashLock().hash });
+  const room = `mb-p-tclk-${accept.contract.slice(2, 18)}`;
+  const delivery = { ...(await record(payeeAgent, room, "PASS signed delivery with exact evidence for the requested job.", String(now + 1), new Date(now + 1).toISOString())), seq: 2 };
+  const reveal = { type: "reveal", from: payeeAgent.did, contract: accept.contract, secret: `0x${"00".repeat(32)}` };
+  const signedFrame = { ...(await record(payeeAgent, room, encodeFrame(reveal), String(now + 2), new Date(now + 2).toISOString())), seq: 3 };
+  const found = await listSignedDeliveries({ messages: [delivery, signedFrame, { from: payeeAgent.did, text: "unsigned delivery" }] }, accept);
+  assert.deepEqual(found.map((entry) => entry.seq), [2]);
 });
 
 test("builds editable easy, medium, hard, and custom hash-bound jobs", async () => {
