@@ -316,7 +316,7 @@ async function inspectPayeeReservation(deal) {
 
 async function recheckAutoAcceptOffer(deal, identity) {
   if (Date.now() >= deal.offer.expiresMs || Date.now() >= deal.offer.claimByMs) return false;
-  const currentSpecResponse = await fetch(`${contextUrl(deal.offer.job.context)}?n=${Date.now()}`, { cache: "no-store" });
+  const currentSpecResponse = await fetch(freshContextUrl(deal.offer.job.context), { cache: "no-store" });
   if (!currentSpecResponse.ok) throw new Error(`Job note recheck failed (${currentSpecResponse.status})`);
   const currentSpec = await reviewJobSpec(await currentSpecResponse.text(), deal.offer);
   if (!currentSpec || currentSpec.hash !== deal.jobSnapshot?.hash) throw new Error("Job note changed after arming");
@@ -504,7 +504,7 @@ function renderPayeeAutoHunter() {
   stop.disabled = !state.armed;
   status.textContent = state.armed
     ? `ARMED · TAB MUST STAY OPEN\nMinimum finish time: ${state.minFinishMinutes}m\n${state.status || "Watching signed tclk-offers"}`
-    : `OFF\n${state.reason || "Arms once, selects the newest safe job, then reserves its room before publishing accept."}`;
+    : `OFF\n${state.reason || "Arms once, selects the newest actionable PAPER job, then reserves its room before publishing accept."}`;
 }
 
 function stopPayeeAutoHunter(reason) {
@@ -559,7 +559,7 @@ async function tryAutoHuntFromPayload(payload) {
   };
   savePayeeDeal(deal);
   pausePayeeAutoHunter(`MATCHED OFFER #${candidate.seq} · HANDING OFF TO ROOM-SAFE AUTO-ACCEPT`);
-  notifyPayeeAutoAccept("Safe Technocore job matched", `Offer #${candidate.seq} is selected; reserving its derived room before accept.`);
+  notifyPayeeAutoAccept("Actionable PAPER job matched", `Offer #${candidate.seq} is selected; reserving its derived room before accept.`);
   await startPayeeAutoAccept(deal, state.notificationPermission);
   return true;
 }
@@ -1340,13 +1340,18 @@ $("#refund-payer-deal").addEventListener("click", async () => {
 
 const readPayeeDeal = () => { try { return JSON.parse(localStorage.getItem(PAYEE_DEAL_KEY)); } catch { return null; } };
 function contextUrl(context) { return context.startsWith("/kv/") ? `https://technocore.chat${context}` : context; }
+function freshContextUrl(context) {
+  const url = new URL(contextUrl(context));
+  url.searchParams.set("n", String(Date.now()));
+  return url.toString();
+}
 async function readOfferHistory() {
   const response = await fetch(`https://technocore.chat/r/${OFFER_ROOM}/export?n=${Date.now()}`, { headers: { accept: "application/x-ndjson, application/json" } });
   if (!response.ok) throw new Error(`Technocore offer history read failed (${response.status})`);
   return response.text();
 }
 async function readOfferTail() {
-  const response = await fetch(`https://technocore.chat/r/${OFFER_ROOM}?format=json&limit=200&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+  const response = await fetch(`https://technocore.chat/r/${OFFER_ROOM}?format=json&limit=200&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw new Error(`Technocore recent offers read failed (${response.status})`);
   return response.json();
 }
@@ -1393,13 +1398,13 @@ function renderPayeeOffers(items) {
     const arm = document.createElement("button"); arm.textContent = "ARM AUTO-ACCEPT →";
     arm.addEventListener("click", () => armPaperOfferAutoAccept(offer, spec, seq));
     card.append(id, title, detail, link, accept, arm); return card;
-  }) : [document.createTextNode("No safe, signed, unexpired PaperRail offers found.")]));
+  }) : [document.createTextNode("No actionable, signed, unexpired PaperRail jobs found.")]));
 }
 
 async function verifyPaperOffers(offers) {
   const checked = await Promise.all(offers.map(async (candidate) => {
     try {
-      const specResponse = await fetch(`${contextUrl(candidate.offer.job.context)}?n=${Date.now()}`, { cache: "no-store" });
+      const specResponse = await fetch(freshContextUrl(candidate.offer.job.context), { cache: "no-store" });
       if (!specResponse.ok) return null;
       const spec = await reviewJobSpec(await specResponse.text(), candidate.offer);
       return spec ? { ...candidate, spec } : null;
@@ -1420,7 +1425,7 @@ $("#scan-offers").addEventListener("click", async () => {
       notice("Fast scan found none; full retained-history scan running");
       verified = await verifyPaperOffers(await listSafePaperOffers(await readOfferHistory(), identity.did));
     }
-    renderPayeeOffers(verified); notice(`${verified.length} signed, unexpired safe PAPER offer${verified.length === 1 ? "" : "s"} found`);
+    renderPayeeOffers(verified); notice(`${verified.length} signed, unexpired actionable PAPER job${verified.length === 1 ? "" : "s"} found`);
   } catch (error) { $("#payee-status").textContent = `Scan failed: ${error.message}`; }
   finally { button.disabled = false; }
 });
@@ -1460,7 +1465,7 @@ $("#payee-auto-hunter").addEventListener("click", async () => {
   if (!Number.isInteger(minFinishMinutes) || minFinishMinutes < 10 || minFinishMinutes > 1440) {
     notice("Minimum finish time must be 10-1440 whole minutes"); return;
   }
-  if (!window.confirm(`Arm the automatic PAPER job hunter?\n\nIt will select the newest signed job that passes the read-only safety checks with at least ${minFinishMinutes} minutes left, create an encrypted local hash-lock secret, reserve and verify the derived room, and only then publish accept. If an unaccepted candidate expires before a slot, it verifies that no accept exists and keeps hunting. It stops after one job is actually accepted. A capacity 400 publishes no accept and hands the job to the slot watcher. Keep this tab open.`)) return;
+  if (!window.confirm(`Arm the automatic PAPER job hunter?\n\nIt will select the newest signed actionable job with at least ${minFinishMinutes} minutes left. Public-web research, repository work, audits, comparisons, extraction, writing and local code/test tasks are eligible; nothing from the job runs automatically. Credential/value requests, unsafe URLs and third-party account mutations remain blocked. It creates an encrypted local hash-lock secret, reserves and verifies the derived room, and only then publishes accept. If an unaccepted candidate expires before a slot, it verifies that no accept exists and keeps hunting. It stops after one job is actually accepted. A capacity 400 publishes no accept and hands the job to the slot watcher. Keep this tab open.`)) return;
   const vaultPassword = window.prompt("Create one deal-vault password for the automatically selected job (minimum 12 characters). Save it now; it stays only in this open tab and is required later to reveal.");
   if (!vaultPassword || vaultPassword.length < 12) { notice("Auto-job hunter cancelled — vault password must be at least 12 characters"); return; }
   let notificationPermission = "unsupported";
@@ -1469,10 +1474,19 @@ $("#payee-auto-hunter").addEventListener("click", async () => {
     catch { notificationPermission = Notification.permission; }
   }
   try {
+    payeeAutoHunterVaultPassword = vaultPassword;
+    savePayeeAutoHunter({
+      armed: true,
+      cursor: 0,
+      minFinishMinutes,
+      notificationPermission,
+      armedAt: new Date().toISOString(),
+      status: "ARMING · READING CURRENT SIGNED OFFERS",
+    });
+    notice("Auto-job hunter is arming; reading the current signed offers");
     const tail = await readOfferTail();
     const cursor = Number(tail.last_seq || tail.messages?.at(-1)?.seq || 0);
-    payeeAutoHunterVaultPassword = vaultPassword;
-    savePayeeAutoHunter({ armed: true, cursor, minFinishMinutes, notificationPermission, armedAt: new Date().toISOString(), status: "Checking current offers first" });
+    savePayeeAutoHunter({ ...readPayeeAutoHunter(), cursor, status: "Checking current offers first" });
     notice("Auto-job hunter armed; checking current offers, then watching new signed offers");
     if (!await tryAutoHuntFromPayload(tail)) void runPayeeAutoHunter();
   } catch (error) {
@@ -1803,7 +1817,7 @@ $("#check-payee-deal").addEventListener("click", async () => {
         $("#payee-status").textContent = `DEAL ROOM NOT RESERVED — JOB NOT ACCEPTED\nContract: ${deal.accept.contract}\nIf Technocore returned 400, discard this unconfirmed local deal.`;
         return;
       }
-      const specResponse = await fetch(`${contextUrl(deal.offer.job.context)}?n=${Date.now()}`);
+      const specResponse = await fetch(freshContextUrl(deal.offer.job.context));
       if (!specResponse.ok) throw new Error(`Job note recheck failed (${specResponse.status})`);
       const currentSpec = await reviewJobSpec(await specResponse.text(), deal.offer);
       if (!currentSpec || currentSpec.hash !== deal.jobSnapshot?.hash) throw new Error("Job note changed after selection; accept blocked");
