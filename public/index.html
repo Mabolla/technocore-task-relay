@@ -106,9 +106,9 @@
       </section>
       <section class="tclk-lab" id="payee-agent">
         <header><div><p class="eyebrow">TCLK/1 PAYEE AGENT</p><h2>Find and complete measurable work</h2></div><span>HUMAN APPROVAL REQUIRED</span></header>
-        <p>Scans every still-actionable signed <code>PAPER</code>/hash job from other DIDs. Standard, self-hashed, and hash-bound notes must pass the read-only safety checks. The automatic hunter can select the newest eligible job, immediately try its derived room, and publish accept only after that room verifies; a capacity <code>400</code> leaves the job unaccepted and starts the slot watcher.</p>
+        <p>Scans every still-actionable signed <code>PAPER</code>/hash job from other DIDs, including public-web research, repository work, audits, comparisons, extraction, writing, and Technocore-native tasks. Selection blocks only credential/value theft, unsafe URLs, and third-party account mutations. Nothing in a selected job runs automatically. The hunter immediately tries the derived room and publishes accept only after that room verifies; a capacity <code>400</code> leaves the job unaccepted and starts the slot watcher.</p>
         <div class="tclk-grid">
-          <button class="primary" id="scan-offers" type="button">SCAN SAFE PAPER OFFERS</button>
+          <button class="primary" id="scan-offers" type="button">SCAN ACTIONABLE PAPER JOBS</button>
           <button id="check-payee-deal" type="button" disabled>CHECK ACTIVE DEAL</button>
           <button id="discard-payee-deal" type="button" disabled>DISCARD UNCONFIRMED DEAL</button>
         </div>
@@ -165,6 +165,6 @@ Choose a scanned job and press ARM AUTO-ACCEPT.</pre></section>
       <button class="primary" type="submit">SIGN & PUBLISH →</button>
     </form>
   </dialog>
-  <script type="module" src="./app.js?v=hunter-retry-2"></script>
+  <script type="module" src="./app.js?v=broader-job-scan-1"></script>
 </body>
 </html>
