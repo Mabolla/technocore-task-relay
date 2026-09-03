@@ -153,6 +153,19 @@ test("auto-accepts only an explicitly armed offer after a verified room reservat
   assert.match(source, /The encrypted pending deal was preserved/);
 });
 
+test("hunts one new safe job and hands it to room-safe auto-accept", () => {
+  assert.match(source, /ARM AUTO-JOB HUNTER/);
+  assert.match(source, /PAYEE AUTO-JOB HUNTER · LOCAL KEY ONLY/);
+  assert.match(source, /PAYEE_AUTO_HUNTER_KEY/);
+  assert.match(source, /Minimum finish time when matched/);
+  assert.match(source, /listSafePaperOffers\(payload, identity\.did, Date\.now\(\), minimumFinishMs\)/);
+  assert.match(source, /selectedBy: "auto-job-hunter"/);
+  assert.match(source, /startPayeeAutoAccept\(deal, state\.notificationPermission\)/);
+  assert.match(source, /STOPPED AFTER REFRESH · ARM AGAIN BECAUSE THE VAULT PASSWORD IS NEVER STORED/);
+  assert.match(source, /It stops after selecting one job/);
+  assert.doesNotMatch(source, /localStorage\.setItem\(PAYEE_AUTO_HUNTER_KEY[^\n]*payeeAutoHunterVaultPassword/);
+});
+
 test("only discards a payee deal after confirming its accept is absent", () => {
   assert.match(source, /DISCARD UNCONFIRMED DEAL/);
   assert.match(source, /verifyAcceptRecord\(await readOfferHistory\(\), deal\.offer, deal\.accept\)/);
