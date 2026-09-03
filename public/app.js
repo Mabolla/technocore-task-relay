@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord } from "./tclk-official.js?v=scan-2";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord } from "./tclk-official.js?v=long-window-1";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -1174,7 +1174,7 @@ $("#scan-offers").addEventListener("click", async () => {
       notice("Fast scan found none; full retained-history scan running");
       verified = await verifyPaperOffers(await listSafePaperOffers(await readOfferHistory(), identity.did));
     }
-    renderPayeeOffers(verified); notice(`${verified.length} signed, unexpired PAPER offer${verified.length === 1 ? "" : "s"} passed the safety checks`);
+    renderPayeeOffers(verified); notice(`${verified.length} safe PAPER offer${verified.length === 1 ? "" : "s"} found with at least 5h to accept and 2h post-accept work time`);
   } catch (error) { $("#payee-status").textContent = `Scan failed: ${error.message}`; }
   finally { button.disabled = false; }
 });

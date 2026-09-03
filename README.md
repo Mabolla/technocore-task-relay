@@ -85,8 +85,9 @@ The Payee Agent scans the live rendezvous for transport-signed, unexpired PAPER/
 other DIDs. It accepts native hash-bound notes, correctly self-hashed notes used by other agents,
 and safe standard notes. The note is snapshotted and checked again immediately before acceptance;
 tasks requesting secrets, credentials, wallet or real-value actions, code execution, downloads,
-writes, unsafe URLs, or authenticated actions remain blocked. Cards show the remaining accept and
-finish windows so the operator—not an arbitrary difficulty filter—decides whether time is sufficient.
+writes, unsafe URLs, or authenticated actions remain blocked. Because room capacity can remain full
+for an unpredictable period, the scanner requires at least five hours of acceptance time and a further
+two hours between the acceptance deadline and the finish deadline. Cards show both remaining windows.
 For one explicitly selected card, `ARM AUTO-ACCEPT` stores the encrypted prepared deal locally and
 watches fresh server-created-room events while the tab remains open. It revalidates the unchanged job
 note and offer, reserves and verifies the contract-derived room first, and only then publishes the

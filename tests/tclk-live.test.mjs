@@ -139,7 +139,7 @@ test("ignores unsigned and unrelated frames", async () => {
 
 test("lists only signed, external, unexpired PAPER jobs", async () => {
   const now = 1_800_000_000_000; const other = await signer();
-  const offer = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 31 * 60_000, claimByMs: now + 46 * 60_000, refundAfterMs: now + 60 * 60_000, job: { proto: "a2a", id: "job-1", context: "https://technocore.chat/r/example" } });
+  const offer = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 5 * 60 * 60_000, claimByMs: now + 7 * 60 * 60_000, refundAfterMs: now + 8 * 60 * 60_000, job: { proto: "a2a", id: "job-1", context: "https://technocore.chat/r/example" } });
   const signed = await record(other, OFFER_ROOM, encodeFrame(offer), "1800000000001", new Date(now).toISOString());
   const found = await listSafePaperOffers({ messages: [signed, { from: other.did, text: encodeFrame(offer) }] }, payer, now);
   assert.equal(found.length, 1); assert.equal(found[0].offer.id, offer.id);
@@ -166,17 +166,20 @@ test("builds payer and payee track records from verified rendezvous frames", asy
   assert.equal(summary.status, "locked"); assert.equal(summary.seqs.lock, 103);
 });
 
-test("lists still-actionable PAPER jobs without an arbitrary ten-minute buffer", async () => {
+test("requires five hours to get a slot and two hours to finish after acceptance", async () => {
   const now = 1_800_000_000_000; const other = await signer();
-  const offer = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 60_000, claimByMs: now + 90 * 60_000, refundAfterMs: now + 120 * 60_000, job: { proto: "a2a", id: "job-rushed", context: "/kv/jobs/job-rushed" } });
+  const offer = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 5 * 60 * 60_000, claimByMs: now + 7 * 60 * 60_000, refundAfterMs: now + 8 * 60 * 60_000, job: { proto: "a2a", id: "job-long-window", context: "/kv/jobs/job-long-window" } });
   const signed = await record(other, OFFER_ROOM, encodeFrame(offer), "1800000000001", new Date(now).toISOString());
   assert.equal((await listSafePaperOffers({ messages: [signed] }, payer, now)).length, 1);
-  assert.equal((await listSafePaperOffers({ messages: [signed] }, payer, now + 60_001)).length, 0);
+  assert.equal((await listSafePaperOffers({ messages: [signed] }, payer, now + 1)).length, 0);
+  const shortWork = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 6 * 60 * 60_000, claimByMs: now + 7 * 60 * 60_000, refundAfterMs: now + 8 * 60 * 60_000, job: { proto: "a2a", id: "job-short-work", context: "/kv/jobs/job-short-work" } });
+  const shortWorkSigned = await record(other, OFFER_ROOM, encodeFrame(shortWork), "1800000000002", new Date(now).toISOString());
+  assert.equal((await listSafePaperOffers({ messages: [shortWorkSigned] }, payer, now)).length, 0);
 });
 
 test("reads a complete Technocore JSONL export", async () => {
   const now = 1_800_000_000_000; const other = await signer();
-  const offer = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 11 * 60_000, claimByMs: now + 31 * 60_000, refundAfterMs: now + 60 * 60_000, job: { proto: "a2a", id: "job-export", context: "/kv/jobs/job-export" } });
+  const offer = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 6 * 60 * 60_000, claimByMs: now + 8 * 60 * 60_000, refundAfterMs: now + 9 * 60 * 60_000, job: { proto: "a2a", id: "job-export", context: "/kv/jobs/job-export" } });
   const signed = await record(other, OFFER_ROOM, encodeFrame(offer), "1800000000001", new Date(now).toISOString());
   const found = await listSafePaperOffers(`${JSON.stringify({ from: "noise", text: "not a frame" })}\n${JSON.stringify(signed)}\n`, payer, now);
   assert.equal(found.length, 1); assert.equal(found[0].offer.id, offer.id);
