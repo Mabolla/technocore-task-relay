@@ -115,6 +115,25 @@
           <button id="publish-receipt" type="button" disabled>SIGN CLAIMED RECEIPT</button>
         </div>
       </section>
+      <section class="track-record" id="track-record">
+        <header>
+          <div><p class="eyebrow">VERIFIED TCLK HISTORY</p><h2>My Track Record</h2><small>Only DID-signed records confirmed on Technocore are counted.</small></div>
+          <button id="refresh-track-record" type="button">REFRESH VERIFIED HISTORY</button>
+        </header>
+        <div class="track-summary">
+          <div><span>Jobs given</span><strong id="track-given">0</strong></div>
+          <div><span>Jobs attempted</span><strong id="track-attempted">0</strong></div>
+          <div><span>Successful</span><strong id="track-successful">0</strong></div>
+          <div><span>Active</span><strong id="track-active">0</strong></div>
+        </div>
+        <p id="track-sync-status">Verified history has not been refreshed yet.</p>
+        <div class="track-table-wrap">
+          <table>
+            <thead><tr><th>Role</th><th>Job</th><th>Verified seq chain</th><th>Status</th></tr></thead>
+            <tbody id="track-record-rows"><tr><td colspan="4">No verified tclk activity saved.</td></tr></tbody>
+          </table>
+        </div>
+      </section>
       <section class="activity" id="activity"><header><b>SIGNED ACTIVITY</b><small>Local signatures and confirmed Technocore submissions</small></header><div id="activity-list" class="empty">No signed activity yet.</div></section>
     </section>
   </main>

@@ -98,6 +98,19 @@ test("offers an editable, safety-locked job builder", () => {
   assert.match(source, /Locked safety: read-only, PAPER-only/);
 });
 
+test("renders a verified tclk track record with lifecycle sequence numbers", () => {
+  assert.match(source, /My Track Record/);
+  assert.match(source, /Jobs given/);
+  assert.match(source, /Jobs attempted/);
+  assert.match(source, /Successful/);
+  assert.match(source, /Verified seq chain/);
+  assert.match(source, /listMyPaperActivity/);
+  assert.match(source, /summarizeDealActivity/);
+  assert.match(source, /TRACK_RECORD_KEY/);
+  assert.match(source, /\["offer", "OFFER"\]/);
+  assert.match(source, /\["receipt", "RECEIPT"\]/);
+});
+
 test("keeps payee secrets browser-local and requires explicit reveal approval", () => {
   assert.match(source, /TCLK\/1 PAYEE AGENT/);
   assert.match(source, /sealSecret\(vaultPassword, prepared\.contract, prepared\.secret\)/);

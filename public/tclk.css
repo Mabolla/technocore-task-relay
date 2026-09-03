@@ -26,9 +26,27 @@
 .job-fields input, .job-fields textarea, .job-builder select { width: 100%; background: #07100d; border: 1px solid var(--line); color: var(--text); padding: 12px; font: inherit; }
 .job-safety { margin: 4px 0 0; border-left: 2px solid var(--green); padding-left: 10px; font-size: 12px; }
 .full-width { width: 100%; margin-bottom: 12px; }
+.track-record { margin-top: 16px; border: 1px solid #2c5c45; background: #09130f; padding: 20px; }
+.track-record > header { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.track-record h2 { margin: 3px 0; }
+.track-record header small, #track-sync-status { color: var(--muted); }
+.track-record button { background: none; border: 1px solid var(--green); color: var(--green); padding: 11px 14px; cursor: pointer; font-weight: 800; }
+.track-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 18px 0; }
+.track-summary div { border: 1px solid var(--line); padding: 14px; display: grid; gap: 4px; }
+.track-summary span { color: var(--muted); font-size: 12px; }
+.track-summary strong { color: var(--green); font-size: 24px; }
+.track-table-wrap { overflow-x: auto; }
+.track-record table { width: 100%; border-collapse: collapse; min-width: 720px; }
+.track-record th, .track-record td { border-bottom: 1px solid var(--line); padding: 12px 10px; text-align: left; vertical-align: top; }
+.track-record th { color: var(--green); font-size: 10px; letter-spacing: .1em; }
+.track-record td { color: var(--muted); }
+.track-record td:first-child, .track-record td:last-child { color: var(--text); font-weight: 700; }
+.track-record code { color: var(--green); white-space: nowrap; }
 @media (max-width: 900px) { .tclk-grid { grid-template-columns: 1fr; } }
 @media (max-width: 700px) {
   .job-builder > header { align-items: stretch; flex-direction: column; }
   .job-fields { grid-template-columns: 1fr; }
   .job-fields .wide { grid-column: auto; }
+  .track-record > header { align-items: stretch; flex-direction: column; }
+  .track-summary { grid-template-columns: repeat(2, 1fr); }
 }

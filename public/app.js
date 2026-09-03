@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listSafePaperOffers, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, verifyAcceptRecord, verifyBoundJobSpec } from "./tclk-official.js";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec } from "./tclk-official.js";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -8,6 +8,7 @@ const TCLK_OFFER_KEY = "mabolla.task-relay.tclk-offer.v1";
 const TCLK_JOB_KEY = "mabolla.task-relay.tclk-job.v1";
 const TCLK_PAYER_DEAL_KEY = "mabolla.task-relay.tclk-payer-deal.v1";
 const PAYEE_DEAL_KEY = "mabolla.task-relay.tclk-payee-deal.v1";
+const TRACK_RECORD_KEY = "mabolla.task-relay.tclk-track-record.v1";
 const CREATOR_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const NETWORK_PROOF = [{
@@ -440,12 +441,13 @@ $("#check-tclk").addEventListener("click", async () => {
     if (!found) { $("#tclk-live-result").textContent = `Offer ${offer.id}\nNo protocol-valid independent accept yet.`; return; }
     const lock = makePaperLock(offer, found.accept, offer.from);
     localStorage.setItem(`${TCLK_OFFER_KEY}.accept`, JSON.stringify(found.accept));
-    localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify({ offer, accept: found.accept, lock }));
+    localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify({ offer, accept: found.accept, acceptSeq: found.seq, lock }));
     $("#create-paper-lock").disabled = false;
     $("#publish-payer-lock").disabled = true;
     $("#tclk-live-result").textContent = `VALID ACCEPT\nCounterparty: ${found.accept.from}\nContract: ${found.contract}\nDeal room: /r/${found.room}\n\nNext payer frame prepared:\n${lock.line}`;
     renderPayerDeal();
     notice("Independent accept validated with the official tclk state machine");
+    void syncTrackRecord({ announce: false });
   } catch (error) { $("#tclk-live-result").textContent = `Check failed: ${error.message}`; }
 });
 
@@ -505,6 +507,7 @@ $("#check-payer-deal").addEventListener("click", async () => {
     localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify(deal));
     renderPayerDeal();
     notice(folded.state.status === "claimed" ? "Valid payee reveal found" : "No valid payee reveal yet");
+    void syncTrackRecord({ announce: false });
   } catch (error) {
     $("#payer-deal-status").textContent = `Payer deal check failed: ${error.message}\nSaved deal data was preserved.`;
   }
@@ -615,6 +618,95 @@ function stripNoteBanner(text) {
   return text.split("\n").filter((line) => !line.startsWith("!!") && line.trim()).join("\n").trimEnd();
 }
 
+const readTrackRecords = () => { try { return JSON.parse(localStorage.getItem(TRACK_RECORD_KEY)) || []; } catch { return []; } };
+const trackKey = (entry) => `${entry.role}:${entry.offer.id}`;
+const statusRank = { offered: 0, expired: 1, accepted: 2, locked: 3, cancelled: 4, refunded: 5, claimed: 6 };
+
+function jobSummary(entry) {
+  const match = String(entry.jobText || "").match(/Task=(.*?) Deliverable=/s);
+  return (match?.[1] || `${entry.offer.job.proto} · ${entry.offer.job.id}`).slice(0, 180);
+}
+
+function statusLabel(entry) {
+  if (entry.status === "claimed" && entry.seqs?.receipt) return "SUCCESSFUL";
+  if (entry.status === "claimed") return "CLAIMED · RECEIPT PENDING";
+  if (entry.status === "refunded" && entry.seqs?.receipt) return "REFUNDED · RECEIPT SIGNED";
+  return String(entry.status || "unknown").toUpperCase();
+}
+
+function renderTrackRecord() {
+  const entries = readTrackRecords();
+  $("#track-given").textContent = entries.filter((entry) => entry.role === "payer").length;
+  $("#track-attempted").textContent = entries.filter((entry) => entry.role === "payee").length;
+  $("#track-successful").textContent = entries.filter((entry) => entry.status === "claimed" && entry.seqs?.receipt).length;
+  $("#track-active").textContent = entries.filter((entry) => ["offered", "accepted", "locked"].includes(entry.status)).length;
+  const body = $("#track-record-rows");
+  if (!entries.length) {
+    const row = document.createElement("tr"); const cell = document.createElement("td"); cell.colSpan = 4; cell.textContent = "No verified tclk activity saved."; row.append(cell); body.replaceChildren(row); return;
+  }
+  body.replaceChildren(...entries.map((entry) => {
+    const row = document.createElement("tr");
+    const role = document.createElement("td"); role.textContent = entry.role === "payer" ? "GAVE JOB" : "DID JOB";
+    const job = document.createElement("td");
+    const summary = document.createElement("div"); summary.textContent = jobSummary(entry);
+    const contract = document.createElement("code"); contract.textContent = entry.contract ? `${entry.contract.slice(0, 12)}…${entry.contract.slice(-6)}` : entry.offer.id.slice(0, 18) + "…";
+    job.append(summary, contract);
+    const chain = document.createElement("td");
+    const seqOrder = [["offer", "OFFER"], ["accept", "ACCEPT"], ["lock", "LOCK"], ["reveal", "REVEAL"], ["refund", "REFUND"], ["cancel", "CANCEL"], ["receipt", "RECEIPT"]];
+    const parts = seqOrder.filter(([type]) => entry.seqs?.[type] != null).map(([type, label]) => `${label} #${entry.seqs[type]}`);
+    chain.textContent = parts.length ? parts.join(" → ") : "No verified seq";
+    const status = document.createElement("td"); status.textContent = statusLabel(entry);
+    row.append(role, job, chain, status); return row;
+  }));
+}
+
+function mergeTrackRecords(fresh) {
+  const merged = new Map(readTrackRecords().map((entry) => [trackKey(entry), entry]));
+  for (const entry of fresh) {
+    const previous = merged.get(trackKey(entry));
+    const status = previous && (statusRank[previous.status] ?? -1) > (statusRank[entry.status] ?? -1) ? previous.status : entry.status;
+    merged.set(trackKey(entry), { ...previous, ...entry, status, seqs: { ...previous?.seqs, ...entry.seqs }, updatedAt: new Date().toISOString() });
+  }
+  const rows = [...merged.values()].sort((a, b) => Number(b.offerSeq || 0) - Number(a.offerSeq || 0));
+  localStorage.setItem(TRACK_RECORD_KEY, JSON.stringify(rows));
+  renderTrackRecord();
+}
+
+async function syncTrackRecord({ announce = true } = {}) {
+  const identity = readIdentity(); if (!identity) return;
+  const button = $("#refresh-track-record"); button.disabled = true;
+  $("#track-sync-status").textContent = "Reading verified Technocore history…";
+  try {
+    const boardResponse = await fetch(`https://technocore.chat/r/${OFFER_ROOM}?format=json&n=${Date.now()}`, { headers: { accept: "application/json" } });
+    if (!boardResponse.ok) throw new Error(`Offer history read failed (${boardResponse.status})`);
+    const activity = await listMyPaperActivity(await boardResponse.json(), identity.did);
+    for (const entry of activity) {
+      if (entry.accept && entry.room) {
+        const roomResponse = await fetch(`https://technocore.chat/r/${entry.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" } });
+        if (roomResponse.ok) {
+          const deal = await summarizeDealActivity(await roomResponse.json(), entry.offer, entry.accept);
+          entry.status = deal.status; entry.seqs = { ...entry.seqs, ...deal.seqs };
+        }
+      } else if (entry.offer.expiresMs <= Date.now()) entry.status = "expired";
+      const jobUrl = contextUrl(entry.offer.job.context);
+      if (jobUrl.startsWith("https://technocore.chat/")) {
+        const specResponse = await fetch(`${jobUrl}?n=${Date.now()}`);
+        if (specResponse.ok) {
+          const spec = await verifyBoundJobSpec(await specResponse.text(), entry.offer);
+          if (spec) entry.jobText = spec.text;
+        }
+      }
+    }
+    mergeTrackRecords(activity);
+    $("#track-sync-status").textContent = `Verified from Technocore · ${new Date().toLocaleString()}`;
+    if (announce) notice(`${activity.length} verified tclk record${activity.length === 1 ? "" : "s"} refreshed`);
+  } catch (error) {
+    $("#track-sync-status").textContent = `History refresh failed: ${error.message}. Saved records were preserved.`;
+  } finally { button.disabled = false; }
+}
+
+$("#refresh-track-record").addEventListener("click", () => syncTrackRecord());
+
 $("#check-payee-deal").addEventListener("click", async () => {
   const deal = readPayeeDeal(); if (!deal) return;
   try {
@@ -642,6 +734,7 @@ $("#check-payee-deal").addEventListener("click", async () => {
     $("#publish-receipt").disabled = !(folded.state.status === "claimed" && railState === "claimed");
     $("#payee-status").textContent = `ACCEPT VERIFIED · seq #${accepted.seq}\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.room}\nTranscript state: ${folded.state.status}\nPaperRail state: ${railState}`;
     notice(`Payee deal state: ${folded.state.status}`);
+    void syncTrackRecord({ announce: false });
   } catch (error) { $("#payee-status").textContent = `Deal check failed: ${error.message}`; }
 });
 
@@ -724,6 +817,8 @@ render();
 if (localStorage.getItem(TCLK_OFFER_KEY)) { $("#check-tclk").disabled = false; }
 if (localStorage.getItem(TCLK_PAYER_DEAL_KEY)) { $("#create-paper-lock").disabled = false; }
 renderPayerDeal();
+renderTrackRecord();
+if (readIdentity()) void syncTrackRecord({ announce: false });
 if (readPayeeDeal()) {
   $("#check-payee-deal").disabled = false;
   $("#discard-payee-deal").disabled = readPayeeDeal().state !== "accept-pending";

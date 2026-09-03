@@ -3291,7 +3291,7 @@ async function findValidAccept(raw, offer, now = Date.now()) {
     if (record.from !== frame.from || !await validTransportSignature(record, OFFER_ROOM)) continue;
     const acceptedAt = Number.isFinite(Date.parse(record.ts)) ? Date.parse(record.ts) : now;
     const step = applyFrame(openContract(offer), frame, acceptedAt);
-    if (step.ok) return { accept: frame, contract: frame.contract, room: dealRoom(frame.contract) };
+    if (step.ok) return { accept: frame, contract: frame.contract, room: dealRoom(frame.contract), seq: record.seq ?? null };
   }
   return null;
 }
@@ -3304,6 +3304,75 @@ async function verifyAcceptRecord(raw, offer, accept, now = Date.now()) {
     if (applyFrame(openContract(offer), frame, at).ok) return { seq: record.seq, record, frame };
   }
   return null;
+}
+function recordTime(record, fallback) {
+  return Number.isFinite(Date.parse(record.ts)) ? Date.parse(record.ts) : fallback;
+}
+async function listMyPaperActivity(raw, myDid, now = Date.now()) {
+  if (!/^did:key:z6Mk/.test(myDid)) return [];
+  const verified = [];
+  for (const record of records(raw)) {
+    const frame = tryDecodeFrame(record.text || "");
+    if (!frame || !["offer", "accept"].includes(frame.type)) continue;
+    if (record.from !== frame.from || !await validTransportSignature(record, OFFER_ROOM)) continue;
+    verified.push({ record, frame });
+  }
+  const offers = new Map(verified.filter(({ frame }) => frame.type === "offer").map((item) => [item.frame.id, item]));
+  const activity = [];
+  for (const item of offers.values()) {
+    const offer = item.frame;
+    if (offer.from !== myDid || offer.role !== "payer" || offer.asset !== "PAPER" || offer.lock !== "hash" || !offer.rails?.includes("paper")) continue;
+    let accepted = null;
+    for (const candidate of verified) {
+      if (candidate.frame.type !== "accept" || candidate.frame.ref !== offer.id || candidate.frame.from === myDid) continue;
+      const step = applyFrame(openContract(offer), candidate.frame, recordTime(candidate.record, now));
+      if (step.ok) {
+        accepted = candidate;
+        break;
+      }
+    }
+    activity.push({
+      role: "payer",
+      offer,
+      offerSeq: item.record.seq ?? null,
+      accept: accepted?.frame || null,
+      acceptSeq: accepted?.record.seq ?? null,
+      contract: accepted?.frame.contract || null,
+      room: accepted ? dealRoom(accepted.frame.contract) : null,
+      status: accepted ? "accepted" : "offered",
+      seqs: { offer: item.record.seq ?? null, accept: accepted?.record.seq ?? null }
+    });
+  }
+  for (const candidate of verified) {
+    const accept = candidate.frame;
+    if (accept.type !== "accept" || accept.from !== myDid) continue;
+    const offerItem = offers.get(accept.ref);
+    if (!offerItem || offerItem.frame.from === myDid) continue;
+    const offer = offerItem.frame;
+    if (offer.role !== "payer" || offer.asset !== "PAPER" || offer.lock !== "hash" || !offer.rails?.includes("paper")) continue;
+    const step = applyFrame(openContract(offer), accept, recordTime(candidate.record, now));
+    if (!step.ok) continue;
+    activity.push({
+      role: "payee",
+      offer,
+      offerSeq: offerItem.record.seq ?? null,
+      accept,
+      acceptSeq: candidate.record.seq ?? null,
+      contract: accept.contract,
+      room: dealRoom(accept.contract),
+      status: "accepted",
+      seqs: { offer: offerItem.record.seq ?? null, accept: candidate.record.seq ?? null }
+    });
+  }
+  return activity.sort((a, b) => Number(b.offerSeq || 0) - Number(a.offerSeq || 0));
+}
+async function summarizeDealActivity(raw, offer, accept, now = Date.now()) {
+  const folded = await foldPayeeDeal(raw, offer, accept, now);
+  const seqs = {};
+  for (const { seq, frame } of folded.applied) {
+    if (["lock", "reveal", "refund", "cancel", "receipt"].includes(frame.type) && seqs[frame.type] == null) seqs[frame.type] = seq ?? null;
+  }
+  return { status: folded.state.status, room: folded.room, seqs };
 }
 async function listSafePaperOffers(raw, myDid, now = Date.now()) {
   const offers = [];
@@ -3422,6 +3491,7 @@ export {
   expectedPaperRefund,
   findValidAccept,
   foldPayeeDeal,
+  listMyPaperActivity,
   listSafePaperOffers,
   makeJobOffer,
   makeLivePaperOffer,
@@ -3431,6 +3501,7 @@ export {
   makePayeeReveal,
   makePayerRefund,
   makeSimpleVerificationOffer,
+  summarizeDealActivity,
   verifyAcceptRecord,
   verifyBoundJobSpec
 };

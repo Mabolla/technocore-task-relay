@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeAccept, generateHashLock, makeOffer, verifySecret } from "@flop-labs/tclk";
-import { JOB_TEMPLATES, OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, encodeFrame, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, listSafePaperOffers, makeJobOffer, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerRefund, makeSimpleVerificationOffer, verifyBoundJobSpec } from "../src/tclk-browser-entry.mjs";
+import { JOB_TEMPLATES, OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, encodeFrame, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, makeJobOffer, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerRefund, makeSimpleVerificationOffer, summarizeDealActivity, verifyBoundJobSpec } from "../src/tclk-browser-entry.mjs";
 
 const payer = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -120,6 +120,27 @@ test("lists only signed, external, unexpired PAPER jobs", async () => {
   const signed = await record(other, OFFER_ROOM, encodeFrame(offer), "1800000000001", new Date(now).toISOString());
   const found = await listSafePaperOffers({ messages: [signed, { from: other.did, text: encodeFrame(offer) }] }, payer, now);
   assert.equal(found.length, 1); assert.equal(found[0].offer.id, offer.id);
+});
+
+test("builds payer and payee track records from verified rendezvous frames", async () => {
+  const now = 1_800_000_000_000; const payerAgent = await signer(); const payeeAgent = await signer();
+  const offer = makeOffer({ from: payerAgent.did, role: "payer", amount: "10", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 60_000, claimByMs: now + 3_600_000, refundAfterMs: now + 7_200_000, job: { proto: "a2a", id: "job-track", context: "/kv/jobs/job-track" } });
+  const hashLock = generateHashLock();
+  const accept = makeAccept(offer, { from: payeeAgent.did, statement: hashLock.hash });
+  const offerRecord = { ...(await record(payerAgent, OFFER_ROOM, encodeFrame(offer), "1800000000001", new Date(now).toISOString())), seq: 101 };
+  const acceptRecord = { ...(await record(payeeAgent, OFFER_ROOM, encodeFrame(accept), "1800000000002", new Date(now + 1).toISOString())), seq: 102 };
+  const board = { messages: [offerRecord, acceptRecord] };
+
+  const payerRows = await listMyPaperActivity(board, payerAgent.did, now + 2);
+  assert.equal(payerRows.length, 1); assert.equal(payerRows[0].role, "payer");
+  assert.deepEqual(payerRows[0].seqs, { offer: 101, accept: 102 });
+  const payeeRows = await listMyPaperActivity(board, payeeAgent.did, now + 2);
+  assert.equal(payeeRows.length, 1); assert.equal(payeeRows[0].role, "payee");
+
+  const lock = { type: "lock", from: payerAgent.did, contract: accept.contract, rail: "paper", ref: accept.contract };
+  const lockRecord = { ...(await record(payerAgent, payeeRows[0].room, encodeFrame(lock), "1800000000003", new Date(now + 2).toISOString())), seq: 103 };
+  const summary = await summarizeDealActivity({ messages: [lockRecord] }, offer, accept, now + 3);
+  assert.equal(summary.status, "locked"); assert.equal(summary.seqs.lock, 103);
 });
 
 test("rejects PAPER jobs with less than 30 minutes left to accept", async () => {

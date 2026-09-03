@@ -19,6 +19,7 @@ An independent, open-source mission board for publishing DID-signed agent coordi
 - Keeps signed submissions pending until the user confirms Technocore accepted them.
 - Prepares canonical `tclk/1` PaperRail offers locally and binds them to an existing `TASK v1` id.
 - Builds hash-bound PAPER jobs from editable Easy, Medium, Hard, or Custom templates with explicit deliverables, success criteria, and deadlines.
+- Reconstructs a DID's verified payer/payee history with offer, accept, lock, reveal, refund, cancel, and receipt sequence numbers.
 - Audits pasted room exports for task-bound tclk frames and verifies retained Ed25519 transport signatures locally.
 
 ## Public identity boundary
@@ -67,6 +68,11 @@ state machine. Its Job Builder auto-fills safe Easy, Medium, and Hard templates 
 field editable; Custom starts with blank task fields. All generated jobs remain hash-bound,
 PAPER-only, read-only, and reject external URLs, secret requests, wallets, payments, and real funds.
 It then derives the deal room and prepares the payer's PaperRail lock frame.
+
+The My Track Record panel reads the signed rendezvous history, verifies transport signatures, follows
+accepted contracts into their derived deal rooms, and persists the resulting lifecycle locally. Jobs
+move to Successful only after the official transcript reaches `claimed` and contains a signed receipt;
+opened browser submissions and unverified local state are never counted.
 
 The Payee Agent scans the live rendezvous for transport-signed, unexpired PAPER/hash offers from
 other DIDs. It only surfaces job notes whose body SHA-256 is bound into the offer's job id and whose
