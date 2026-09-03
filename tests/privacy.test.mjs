@@ -109,6 +109,9 @@ test("renders a verified tclk track record with lifecycle sequence numbers", () 
   assert.match(source, /TRACK_RECORD_KEY/);
   assert.match(source, /\["offer", "OFFER"\]/);
   assert.match(source, /\["receipt", "RECEIPT"\]/);
+  assert.match(source, /SUCCESSFUL · DELIVERY VERIFIED/);
+  assert.match(source, /CLAIMED · RECEIPT PRESENT · NO DELIVERY/);
+  assert.match(source, /successfulTrackEntry/);
 });
 
 test("keeps payee secrets browser-local and requires explicit reveal approval", () => {
@@ -232,6 +235,17 @@ test("safe auto-settle fails closed before signing a terminal payer receipt", ()
   assert.match(source, /identity\.did !== deal\.offer\.from/);
   assert.match(source, /TERMINAL RECEIPT VERIFIED/);
   assert.doesNotMatch(source, /AUTO REFUND/);
+});
+
+test("manual payer settlement requires a signed delivery and blocks duplicate receipts", () => {
+  assert.match(source, /SIGNED DELIVERY GATE/);
+  assert.match(source, /inspectSignedPayerDelivery/);
+  assert.match(source, /claimedDeliveryApproved/);
+  assert.match(source, /Receipt stays disabled/);
+  assert.match(source, /no approved signed delivery exists before reveal/);
+  assert.match(source, /Terminal receipt already exists at seq/);
+  assert.match(source, /no duplicate was published/);
+  assert.match(source, /Approve this exact signed delivery manually/);
 });
 
 test("refunds an expired locked payer deal before issuing its terminal receipt", () => {
