@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord } from "./tclk-official.js?v=slot-match-2";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord } from "./tclk-official.js?v=auto-hunter-1";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -12,6 +12,7 @@ const PAYER_AUTOPILOT_KEY = "mabolla.task-relay.payer-autopilot.v1";
 const PAYER_AUTO_SETTLE_KEY = "mabolla.task-relay.payer-auto-settle.v1";
 const PAYEE_DEAL_KEY = "mabolla.task-relay.tclk-payee-deal.v1";
 const PAYEE_AUTO_ACCEPT_KEY = "mabolla.task-relay.payee-auto-accept.v1";
+const PAYEE_AUTO_HUNTER_KEY = "mabolla.task-relay.payee-auto-hunter.v1";
 const TRACK_RECORD_KEY = "mabolla.task-relay.tclk-track-record.v1";
 const CREATOR_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -104,9 +105,12 @@ const readPayerDeals = () => { try { return JSON.parse(localStorage.getItem(TCLK
 const readPayerAutopilot = () => { try { return JSON.parse(localStorage.getItem(PAYER_AUTOPILOT_KEY)) || { armed: false }; } catch { return { armed: false }; } };
 const readPayerAutoSettle = () => { try { return JSON.parse(localStorage.getItem(PAYER_AUTO_SETTLE_KEY)) || { armed: false }; } catch { return { armed: false }; } };
 const readPayeeAutoAccept = () => { try { return JSON.parse(localStorage.getItem(PAYEE_AUTO_ACCEPT_KEY)) || { armed: false }; } catch { return { armed: false }; } };
+const readPayeeAutoHunter = () => { try { return JSON.parse(localStorage.getItem(PAYEE_AUTO_HUNTER_KEY)) || { armed: false }; } catch { return { armed: false }; } };
 let payerAutopilotRunning = false;
 let payerAutoSettleRunning = false;
 let payeeAutoAcceptRunning = false;
+let payeeAutoHunterRunning = false;
+let payeeAutoHunterVaultPassword = null;
 
 function rememberPayerDeal(deal) {
   const contract = deal?.accept?.contract;
@@ -317,7 +321,7 @@ async function recheckAutoAcceptOffer(deal, identity) {
   const currentSpec = await reviewJobSpec(await currentSpecResponse.text(), deal.offer);
   if (!currentSpec || currentSpec.hash !== deal.jobSnapshot?.hash) throw new Error("Job note changed after arming");
   const windowPayload = await readOfferWindow(deal.offerSeq);
-  const available = await listSafePaperOffers(windowPayload, identity.did);
+  const available = await listSafePaperOffers(windowPayload, identity.did, Date.now(), Number(deal.minimumFinishMs || 0));
   return available.some((candidate) => candidate.offer.id === deal.offer.id);
 }
 
@@ -441,6 +445,104 @@ async function runPayeeAutoAccept() {
     return;
   } finally {
     if (!readPayeeAutoAccept().armed) payeeAutoAcceptRunning = false;
+  }
+}
+
+function savePayeeAutoHunter(state) {
+  localStorage.setItem(PAYEE_AUTO_HUNTER_KEY, JSON.stringify(state));
+  renderPayeeAutoHunter();
+}
+
+function renderPayeeAutoHunter() {
+  const state = readPayeeAutoHunter();
+  const status = $("#payee-auto-hunter-status");
+  const arm = $("#payee-auto-hunter");
+  const stop = $("#payee-auto-hunter-stop");
+  if (!status || !arm || !stop) return;
+  arm.disabled = state.armed || Boolean(readPayeeDeal());
+  stop.disabled = !state.armed;
+  status.textContent = state.armed
+    ? `ARMED · TAB MUST STAY OPEN\nMinimum finish time: ${state.minFinishMinutes}m\n${state.status || "Watching signed tclk-offers"}`
+    : `OFF\n${state.reason || "Arms once, selects the newest safe job, then reserves its room before publishing accept."}`;
+}
+
+function stopPayeeAutoHunter(reason) {
+  const state = readPayeeAutoHunter();
+  savePayeeAutoHunter({ ...state, armed: false, reason, stoppedAt: new Date().toISOString() });
+  payeeAutoHunterVaultPassword = null;
+  payeeAutoHunterRunning = false;
+}
+
+async function tryAutoHuntFromPayload(payload) {
+  const state = readPayeeAutoHunter();
+  const identity = readIdentity();
+  if (!state.armed || !identity) return false;
+  if (readPayeeDeal()) {
+    stopPayeeAutoHunter("PAUSED · AN ACTIVE OR PREPARED PAYEE DEAL ALREADY EXISTS");
+    return false;
+  }
+  if (!payeeAutoHunterVaultPassword) {
+    stopPayeeAutoHunter("STOPPED AFTER REFRESH · ARM AGAIN BECAUSE THE VAULT PASSWORD IS NEVER STORED");
+    return false;
+  }
+  state.status = "Checking newest signed offers";
+  savePayeeAutoHunter(state);
+  const minimumFinishMs = state.minFinishMinutes * 60_000;
+  const safe = (await listSafePaperOffers(payload, identity.did, Date.now(), minimumFinishMs)).slice(0, 8);
+  const verified = await verifyPaperOffers(safe);
+  const candidate = verified[0];
+  if (!candidate) {
+    state.status = "No eligible offer yet · still watching";
+    savePayeeAutoHunter(state);
+    return false;
+  }
+
+  const prepared = makePayeeAcceptance(candidate.offer, identity.did);
+  const sealedSecret = await sealSecret(payeeAutoHunterVaultPassword, prepared.contract, prepared.secret);
+  const deal = {
+    offer: candidate.offer,
+    offerSeq: candidate.seq,
+    accept: prepared.accept,
+    acceptLine: prepared.line,
+    room: prepared.room,
+    sealedSecret,
+    jobSnapshot: candidate.spec,
+    selectedBy: "auto-job-hunter",
+    minimumFinishMs,
+  };
+  savePayeeDeal(deal);
+  stopPayeeAutoHunter(`MATCHED OFFER #${candidate.seq} · HANDING OFF TO ROOM-SAFE AUTO-ACCEPT`);
+  notifyPayeeAutoAccept("Safe Technocore job matched", `Offer #${candidate.seq} is selected; reserving its derived room before accept.`);
+  await startPayeeAutoAccept(deal, state.notificationPermission);
+  return true;
+}
+
+async function runPayeeAutoHunter() {
+  if (payeeAutoHunterRunning || !readPayeeAutoHunter().armed) return;
+  payeeAutoHunterRunning = true;
+  try {
+    while (readPayeeAutoHunter().armed) {
+      const state = readPayeeAutoHunter();
+      const response = await fetch(`https://technocore.chat/r/${OFFER_ROOM}?since=${state.cursor}&wait=10&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+      if (!response.ok) throw new Error(`Offer stream failed (${response.status})`);
+      const payload = await response.json();
+      const messages = Array.isArray(payload.messages) ? payload.messages : [];
+      for (const message of messages) if (Number(message.seq) > Number(state.cursor)) state.cursor = Number(message.seq);
+      state.lastPollAt = new Date().toISOString();
+      savePayeeAutoHunter(state);
+      const tail = messages.length ? await readOfferTail() : payload;
+      if (await tryAutoHuntFromPayload(tail)) break;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  } catch (error) {
+    const state = readPayeeAutoHunter();
+    state.status = `TEMPORARY ERROR · ${error.message} · RETRYING`;
+    state.lastErrorAt = new Date().toISOString();
+    savePayeeAutoHunter(state);
+    setTimeout(() => { payeeAutoHunterRunning = false; void runPayeeAutoHunter(); }, 10_000);
+    return;
+  } finally {
+    if (!readPayeeAutoHunter().armed) payeeAutoHunterRunning = false;
   }
 }
 
@@ -1174,9 +1276,44 @@ $("#scan-offers").addEventListener("click", async () => {
       notice("Fast scan found none; full retained-history scan running");
       verified = await verifyPaperOffers(await listSafePaperOffers(await readOfferHistory(), identity.did));
     }
-    renderPayeeOffers(verified); notice(`${verified.length} safe PAPER offer${verified.length === 1 ? "" : "s"} found with at least 2h of real remaining finish time`);
+    renderPayeeOffers(verified); notice(`${verified.length} signed, unexpired safe PAPER offer${verified.length === 1 ? "" : "s"} found`);
   } catch (error) { $("#payee-status").textContent = `Scan failed: ${error.message}`; }
   finally { button.disabled = false; }
+});
+
+$("#payee-auto-hunter").addEventListener("click", async () => {
+  const identity = readIdentity();
+  if (!identity) { notice("Restore the existing DID before arming the auto-job hunter"); return; }
+  if (readPayeeDeal()) { notice("Finish or discard the active/prepared payee deal before hunting another job"); return; }
+  const minFinishMinutes = Number($("#payee-auto-hunter-minutes").value);
+  if (!Number.isInteger(minFinishMinutes) || minFinishMinutes < 10 || minFinishMinutes > 1440) {
+    notice("Minimum finish time must be 10-1440 whole minutes"); return;
+  }
+  if (!window.confirm(`Arm the automatic PAPER job hunter?\n\nIt will select the newest signed job that passes the read-only safety checks with at least ${minFinishMinutes} minutes left, create an encrypted local hash-lock secret, reserve and verify the derived room, and only then publish accept. It stops after selecting one job. A capacity 400 publishes no accept and hands the job to the slot watcher. Keep this tab open.`)) return;
+  const vaultPassword = window.prompt("Create one deal-vault password for the automatically selected job (minimum 12 characters). Save it now; it stays only in this open tab and is required later to reveal.");
+  if (!vaultPassword || vaultPassword.length < 12) { notice("Auto-job hunter cancelled — vault password must be at least 12 characters"); return; }
+  let notificationPermission = "unsupported";
+  if ("Notification" in window) {
+    try { notificationPermission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission; }
+    catch { notificationPermission = Notification.permission; }
+  }
+  try {
+    const tail = await readOfferTail();
+    const cursor = Number(tail.last_seq || tail.messages?.at(-1)?.seq || 0);
+    payeeAutoHunterVaultPassword = vaultPassword;
+    savePayeeAutoHunter({ armed: true, cursor, minFinishMinutes, notificationPermission, armedAt: new Date().toISOString(), status: "Checking current offers first" });
+    notice("Auto-job hunter armed; checking current offers, then watching new signed offers");
+    if (!await tryAutoHuntFromPayload(tail)) void runPayeeAutoHunter();
+  } catch (error) {
+    stopPayeeAutoHunter(`AUTO-JOB HUNTER WAS NOT ARMED · ${error.message}`);
+    notice(`Auto-job hunter failed to arm: ${error.message}`);
+  }
+});
+
+$("#payee-auto-hunter-stop").addEventListener("click", () => {
+  if (!readPayeeAutoHunter().armed) return;
+  stopPayeeAutoHunter("STOPPED BY USER · NO JOB SELECTED");
+  notice("Auto-job hunter stopped");
 });
 
 async function acceptPaperOffer(offer, jobSnapshot) {
@@ -1598,6 +1735,16 @@ renderTrackRecord();
 renderPayerAutopilot();
 renderPayerAutoSettle();
 renderPayeeAutoAccept();
+if (readPayeeAutoHunter().armed) {
+  const staleHunter = readPayeeAutoHunter();
+  localStorage.setItem(PAYEE_AUTO_HUNTER_KEY, JSON.stringify({
+    ...staleHunter,
+    armed: false,
+    stoppedAt: new Date().toISOString(),
+    reason: "STOPPED AFTER REFRESH · ARM AGAIN BECAUSE THE VAULT PASSWORD IS NEVER STORED",
+  }));
+}
+renderPayeeAutoHunter();
 if (readPayerAutopilot().armed) void runPayerAutopilot();
 if (readPayerAutoSettle().armed) void runPayerAutoSettle();
 if (readPayeeAutoAccept().armed) void runPayeeAutoAccept();
