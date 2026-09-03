@@ -172,6 +172,9 @@ test("hunts one new safe job and hands it to room-safe auto-accept", () => {
   assert.match(source, /VERIFIED NO ACCEPT · WATCHING NEXT OFFERS/);
   assert.match(source, /await verifyAcceptRecord\(await readOfferHistory\(\), deal\.offer, deal\.accept\)/);
   assert.match(source, /EXPIRED BEFORE ROOM SLOT — NO ACCEPT VERIFIED/);
+  assert.match(source, /VERIFY STALE DEAL & ARM AUTO-JOB HUNTER/);
+  assert.match(source, /VERIFIED UNACCEPTED STALE CANDIDATE CLEARED/);
+  assert.match(source, /Hunter not armed — the previous accept exists at seq/);
   assert.match(source, /STOPPED AFTER REFRESH · ARM AGAIN BECAUSE THE VAULT PASSWORD IS NEVER STORED/);
   assert.match(source, /It stops once one job is actually accepted/);
   assert.doesNotMatch(source, /localStorage\.setItem\(PAYEE_AUTO_HUNTER_KEY[^\n]*payeeAutoHunterVaultPassword/);
