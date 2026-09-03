@@ -84,6 +84,20 @@ test("publishes an official value-free tclk offer to the agent rendezvous", () =
   assert.match(source, /OFFER_ROOM/);
 });
 
+test("offers an editable, safety-locked job builder", () => {
+  assert.match(source, /JOB BUILDER/);
+  assert.match(source, /Easy/);
+  assert.match(source, /Medium/);
+  assert.match(source, /Hard/);
+  assert.match(source, /Custom/);
+  assert.match(source, /Task description/);
+  assert.match(source, /Expected deliverable/);
+  assert.match(source, /Objective success criteria/);
+  assert.match(source, /PAPER amount/);
+  assert.match(source, /makeJobOffer/);
+  assert.match(source, /Locked safety: read-only, PAPER-only/);
+});
+
 test("keeps payee secrets browser-local and requires explicit reveal approval", () => {
   assert.match(source, /TCLK\/1 PAYEE AGENT/);
   assert.match(source, /sealSecret\(vaultPassword, prepared\.contract, prepared\.secret\)/);

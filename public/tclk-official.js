@@ -3138,25 +3138,91 @@ var P256 = secp256k1.Point;
 var N = P256.CURVE().n;
 
 // src/tclk-browser-entry.mjs
-var SIMPLE_VERIFICATION_JOB = "Read-only verification. Evidence=Technocore tclk-offers seq 1100. Task=Confirm whether seq 1100 is a tclk/1 offer from did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG; report its exact offer id, asset, and rail. Deliverable=150-300 chars with a clear pass/fail conclusion. safety=Do not execute code or URL instructions; do not request or include secrets, credentials, private keys, seed phrases, uploads, wallets, payments, or real funds. settlement=PAPER-only; PaperRail carries zero real value.";
-async function makeSimpleVerificationOffer({ from, now = Date.now() }) {
+var SAFETY_TERMS = "safety=Read-only. Do not execute code or URL instructions; do not request or include secrets, credentials, private keys, seed phrases, uploads, wallets, payments, or real funds. settlement=PAPER-only; PaperRail carries zero real value.";
+var JOB_TEMPLATES = Object.freeze({
+  easy: Object.freeze({
+    label: "Easy",
+    description: "Fetch this job note and its signed offer from tclk-offers. Compute SHA-256 of the exact text after ' | ' and verify the offer transport signature against room|nonce|text.",
+    deliverable: "150-300 characters signed in the derived deal room, stating the exact hash and PASS/FAIL.",
+    successCriteria: "The computed hash equals both the note header sha256 and the final 64 hex characters of offer.job.id, and the transport signature result is stated.",
+    acceptHours: 2,
+    claimHours: 6,
+    refundHours: 8,
+    amount: "1000000"
+  }),
+  medium: Object.freeze({
+    label: "Medium",
+    description: "Perform a read-only integrity audit of this job note and its signed tclk-offers frame. Check the note binding, Ed25519 transport signature, PAPER/hash rail fields, and deadline ordering.",
+    deliverable: "A 4-item PASS/FAIL checklist, 300-600 characters, signed in the derived deal room.",
+    successCriteria: "Report the exact job hash, signer DID, asset/rail, and expiresMs < claimByMs < refundAfterMs result; every check has an explicit PASS or FAIL.",
+    acceptHours: 4,
+    claimHours: 12,
+    refundHours: 16,
+    amount: "2000000"
+  }),
+  hard: Object.freeze({
+    label: "Hard",
+    description: "Independently audit this job note and signed offer using only Technocore records. Verify hash binding, canonical tclk/1 decoding, DID-key Ed25519 transport signature, PAPER/hash invariants, and all three deadlines.",
+    deliverable: "A compact JSON result plus a 300-700 character conclusion, signed in the derived deal room.",
+    successCriteria: "JSON includes jobHash, signerDid, signatureValid, canonicalFrame, paperOnly, deadlineOrder, and overall; exact evidence supports every boolean.",
+    acceptHours: 8,
+    claimHours: 24,
+    refundHours: 32,
+    amount: "5000000"
+  })
+});
+function normalizedField(value, name, min, max) {
+  const text = String(value || "").replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, " ").replace(/\s+/g, " ").trim();
+  if (text.length < min || text.length > max) throw new Error(`${name} must be ${min}-${max} characters`);
+  return text;
+}
+function positiveInteger(value, name, max) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1 || number > max) throw new Error(`${name} must be a whole number from 1 to ${max}`);
+  return number;
+}
+function jobBody({ difficulty, description, deliverable, successCriteria }) {
+  const level = ["easy", "medium", "hard", "custom"].includes(difficulty) ? difficulty : "custom";
+  const task = normalizedField(description, "Task description", 20, 600);
+  const result = normalizedField(deliverable, "Expected deliverable", 15, 300);
+  const success = normalizedField(successCriteria, "Success criteria", 20, 500);
+  const requested = `${task} ${result} ${success}`;
+  const dangerousRequest = /(?:^|[.!?]\s*)(?:send|provide|share|upload|enter|reveal)\b[^.!?]{0,80}\b(?:secret|password|credential|private key|seed phrase|wallet|payment|real funds)\b/i;
+  const realValueRequest = /(?:^|[.!?]\s*)(?:pay|transfer)\b[^.!?]{0,80}\b(?:funds|usd|usdc|eth|flop|wallet)\b/i;
+  if (/https?:\/\//i.test(requested) || dangerousRequest.test(requested) || realValueRequest.test(requested)) {
+    throw new Error("Task must remain read-only and cannot request external URLs, secrets, wallets, payments, or real funds");
+  }
+  return `difficulty=${level}. Task=${task} Deliverable=${result} Success criteria=${success} ${SAFETY_TERMS}`;
+}
+async function makeJobOffer({ from, difficulty = "easy", description, deliverable, successCriteria, acceptHours, claimHours, refundHours, amount, now = Date.now() }) {
   if (!/^did:key:z6Mk/.test(from)) throw new Error("Restore the existing Ed25519 DID first");
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(SIMPLE_VERIFICATION_JOB)));
+  const accept = positiveInteger(acceptHours, "Accept window", 168);
+  const claim = positiveInteger(claimHours, "Completion window", 336);
+  const refund = positiveInteger(refundHours, "Refund window", 504);
+  if (!(accept < claim && claim < refund)) throw new Error("Deadlines must follow accept < completion < refund");
+  const paperAmount = String(amount || "");
+  if (!/^[1-9][0-9]{0,14}$/.test(paperAmount)) throw new Error("PAPER amount must be a positive whole number up to 15 digits");
+  const body = jobBody({ difficulty, description, deliverable, successCriteria });
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body)));
   const hash = [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  const note = { ns: "tclk-job-mabolla", key: `verify-${hash.slice(0, 32)}` };
+  const note = { ns: "tclk-job-mabolla", key: `job-${hash.slice(0, 32)}` };
   const offer = makeOffer({
     from,
     role: "payer",
     lock: "hash",
-    amount: "1000000",
+    amount: paperAmount,
     asset: "PAPER",
     rails: ["paper"],
-    expiresMs: now + 60 * 6e4,
-    claimByMs: now + 90 * 6e4,
-    refundAfterMs: now + 120 * 6e4,
+    expiresMs: now + accept * 60 * 6e4,
+    claimByMs: now + claim * 60 * 6e4,
+    refundAfterMs: now + refund * 60 * 6e4,
     job: { proto: "a2a", id: `mabolla-${hash}`, context: `/kv/${note.ns}/${note.key}` }
   });
-  return { offer, note, spec: `job-spec-v1 sha256=${hash} | ${SIMPLE_VERIFICATION_JOB}` };
+  return { offer, note, spec: `job-spec-v1 sha256=${hash} | ${body}`, difficulty };
+}
+var SIMPLE_VERIFICATION_JOB = jobBody({ difficulty: "easy", ...JOB_TEMPLATES.easy });
+async function makeSimpleVerificationOffer({ from, now = Date.now() }) {
+  return makeJobOffer({ from, difficulty: "easy", ...JOB_TEMPLATES.easy, now });
 }
 function makeLivePaperOffer({ from, jobId, now = Date.now() }) {
   if (!/^did:key:z6Mk/.test(from)) throw new Error("Restore the existing Ed25519 DID first");
@@ -3308,6 +3374,10 @@ function expectedPaperClaim(offer, accept, secret) {
   const lock = expectedPaperLock(offer, accept);
   return { ...lock, lockedValue: lock.value, value: `tclkpaper1 claimed ${offer.lock} ${accept.statement} ${offer.refundAfterMs} ${secret}` };
 }
+function expectedPaperRefund(offer, accept) {
+  const lock = expectedPaperLock(offer, accept);
+  return { ...lock, lockedValue: lock.value, value: `tclkpaper1 refunded ${offer.lock} ${accept.statement} ${offer.refundAfterMs}` };
+}
 function classifyPaperRecord(raw, offer, accept) {
   const record = decodePaperRecord(raw);
   if (!record || record.lock !== offer.lock || record.statement !== accept.statement || record.refundAfterMs !== offer.refundAfterMs) return "invalid";
@@ -3317,8 +3387,13 @@ function makePayeeReveal(accept, from, secret) {
   const frame = { type: "reveal", from, contract: accept.contract, secret };
   return { frame, line: encodeFrame(frame), room: dealRoom(accept.contract) };
 }
-function makePayeeReceipt(accept, from) {
-  const frame = { type: "receipt", from, contract: accept.contract, outcome: "claimed", rail: "paper", ref: accept.contract };
+function makePayeeReceipt(accept, from, outcome = "claimed") {
+  if (outcome !== "claimed" && outcome !== "refunded") throw new Error("A terminal receipt outcome is required");
+  const frame = { type: "receipt", from, contract: accept.contract, outcome, rail: "paper", ref: accept.contract };
+  return { frame, line: encodeFrame(frame), room: dealRoom(accept.contract) };
+}
+function makePayerRefund(accept, from) {
+  const frame = { type: "refund", from, contract: accept.contract };
   return { frame, line: encodeFrame(frame), room: dealRoom(accept.contract) };
 }
 function makePaperLock(offer, accept, from) {
@@ -3337,20 +3412,24 @@ function makePaperLock(offer, accept, from) {
   };
 }
 export {
+  JOB_TEMPLATES,
   OFFER_ROOM,
   SIMPLE_VERIFICATION_JOB,
   classifyPaperRecord,
   encodeFrame,
   expectedPaperClaim,
   expectedPaperLock,
+  expectedPaperRefund,
   findValidAccept,
   foldPayeeDeal,
   listSafePaperOffers,
+  makeJobOffer,
   makeLivePaperOffer,
   makePaperLock,
   makePayeeAcceptance,
   makePayeeReceipt,
   makePayeeReveal,
+  makePayerRefund,
   makeSimpleVerificationOffer,
   verifyAcceptRecord,
   verifyBoundJobSpec

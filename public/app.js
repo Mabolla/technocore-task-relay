@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { OFFER_ROOM, classifyPaperRecord, encodeFrame, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listSafePaperOffers, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, makeSimpleVerificationOffer, verifyAcceptRecord, verifyBoundJobSpec } from "./tclk-official.js";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listSafePaperOffers, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, verifyAcceptRecord, verifyBoundJobSpec } from "./tclk-official.js";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -331,19 +331,73 @@ $("#mission-form").addEventListener("submit", async (event) => {
   event.currentTarget.reset(); $("#mission-dialog").close(); render();
 });
 
+const jobBuilderFields = {
+  description: $("#tclk-description"),
+  deliverable: $("#tclk-deliverable"),
+  successCriteria: $("#tclk-success"),
+  acceptHours: $("#tclk-accept-hours"),
+  claimHours: $("#tclk-claim-hours"),
+  refundHours: $("#tclk-refund-hours"),
+  amount: $("#tclk-amount"),
+};
+
+function applyJobTemplate(level) {
+  const template = JOB_TEMPLATES[level];
+  if (template) {
+    for (const [name, field] of Object.entries(jobBuilderFields)) field.value = template[name];
+  } else {
+    jobBuilderFields.description.value = "";
+    jobBuilderFields.deliverable.value = "";
+    jobBuilderFields.successCriteria.value = "";
+    jobBuilderFields.acceptHours.value = 2;
+    jobBuilderFields.claimHours.value = 6;
+    jobBuilderFields.refundHours.value = 8;
+    jobBuilderFields.amount.value = "1000000";
+  }
+}
+
+$("#tclk-difficulty").addEventListener("change", (event) => {
+  applyJobTemplate(event.target.value);
+  $("#publish-job-spec").disabled = true;
+  $("#verify-job-spec").disabled = true;
+  $("#publish-tclk").disabled = true;
+  $("#tclk-preview").textContent = "Template loaded. Review or edit the job, then prepare the offer.";
+});
+
+for (const field of Object.values(jobBuilderFields)) field.addEventListener("input", () => {
+  if (!localStorage.getItem(TCLK_JOB_KEY)) return;
+  $("#publish-job-spec").disabled = true;
+  $("#verify-job-spec").disabled = true;
+  $("#publish-tclk").disabled = true;
+  $("#tclk-preview").textContent = "Job fields changed. Prepare again to bind the new text and deadlines.";
+});
+
+applyJobTemplate("easy");
+
 $("#prepare-tclk").addEventListener("click", async () => {
   const identity = readIdentity();
   if (!identity) { notice("Restore the existing DID before preparing a tclk offer"); return; }
   try {
-    const prepared = await makeSimpleVerificationOffer({ from: identity.did });
+    const difficulty = $("#tclk-difficulty").value;
+    const prepared = await makeJobOffer({
+      from: identity.did,
+      difficulty,
+      description: jobBuilderFields.description.value,
+      deliverable: jobBuilderFields.deliverable.value,
+      successCriteria: jobBuilderFields.successCriteria.value,
+      acceptHours: jobBuilderFields.acceptHours.value,
+      claimHours: jobBuilderFields.claimHours.value,
+      refundHours: jobBuilderFields.refundHours.value,
+      amount: jobBuilderFields.amount.value,
+    });
     const { offer } = prepared;
     $("#tclk-preview").textContent = encodeFrame(offer);
     localStorage.setItem(TCLK_OFFER_KEY, JSON.stringify(offer));
     localStorage.setItem(TCLK_JOB_KEY, JSON.stringify(prepared));
     $("#publish-job-spec").disabled = false; $("#verify-job-spec").disabled = false;
     $("#publish-tclk").disabled = true; $("#check-tclk").disabled = false;
-    $("#tclk-live-result").textContent = `SIMPLE JOB PREPARED\n${prepared.spec}\n\nOffer ${offer.id}\nPublish and verify the job note before publishing the offer.`;
-    notice("Simple hash-bound job prepared; publish its job note first");
+    $("#tclk-live-result").textContent = `${difficulty.toUpperCase()} JOB PREPARED\n${prepared.spec}\n\nOffer ${offer.id}\nPublish and verify the job note before publishing the offer.`;
+    notice("Hash-bound job prepared; publish its job note first");
   } catch (error) { notice(error.message); }
 });
 

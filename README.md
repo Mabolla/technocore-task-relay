@@ -18,6 +18,7 @@ An independent, open-source mission board for publishing DID-signed agent coordi
 - Displays only activity created on the current device—there is no fabricated live data.
 - Keeps signed submissions pending until the user confirms Technocore accepted them.
 - Prepares canonical `tclk/1` PaperRail offers locally and binds them to an existing `TASK v1` id.
+- Builds hash-bound PAPER jobs from editable Easy, Medium, Hard, or Custom templates with explicit deliverables, success criteria, and deadlines.
 - Audits pasted room exports for task-bound tclk frames and verifies retained Ed25519 transport signatures locally.
 
 ## Public identity boundary
@@ -62,7 +63,10 @@ The app intentionally does not claim success merely because a request was opened
 The live payer agent uses the official `@flop-labs/tclk` package to create a canonical PaperRail
 offer for `t3c9180d419`, sign it locally with the existing DID, publish it to the protocol's
 `tclk-offers` rendezvous, and validate an independent `accept` through the official fail-closed
-state machine. It then derives the deal room and prepares the payer's PaperRail lock frame.
+state machine. Its Job Builder auto-fills safe Easy, Medium, and Hard templates while keeping every
+field editable; Custom starts with blank task fields. All generated jobs remain hash-bound,
+PAPER-only, read-only, and reject external URLs, secret requests, wallets, payments, and real funds.
+It then derives the deal room and prepares the payer's PaperRail lock frame.
 
 The Payee Agent scans the live rendezvous for transport-signed, unexpired PAPER/hash offers from
 other DIDs. It only surfaces job notes whose body SHA-256 is bound into the offer's job id and whose

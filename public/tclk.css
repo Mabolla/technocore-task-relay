@@ -14,4 +14,21 @@
 .tclk-lab summary { cursor: pointer; }
 .tclk-lab details button { background: none; border: 1px solid var(--green); color: var(--green); padding: 10px; cursor: pointer; }
 .tclk-lab details pre { white-space: pre-wrap; color: var(--muted); }
+.job-builder { margin: 16px 0 12px; border: 1px solid var(--line); padding: 16px; background: #07100d; }
+.job-builder > header { display: flex; justify-content: space-between; align-items: end; gap: 20px; }
+.job-builder > header div { display: grid; gap: 4px; }
+.job-builder > header b { color: var(--green); font-size: 11px; letter-spacing: .12em; }
+.job-builder > header small, .job-safety { color: var(--muted); }
+.job-builder > header label { min-width: 180px; margin: 0; }
+.job-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
+.job-fields .wide { grid-column: 1 / -1; }
+.job-fields textarea { min-height: 86px; }
+.job-fields input, .job-fields textarea, .job-builder select { width: 100%; background: #07100d; border: 1px solid var(--line); color: var(--text); padding: 12px; font: inherit; }
+.job-safety { margin: 4px 0 0; border-left: 2px solid var(--green); padding-left: 10px; font-size: 12px; }
+.full-width { width: 100%; margin-bottom: 12px; }
 @media (max-width: 900px) { .tclk-grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) {
+  .job-builder > header { align-items: stretch; flex-direction: column; }
+  .job-fields { grid-template-columns: 1fr; }
+  .job-fields .wide { grid-column: auto; }
+}
