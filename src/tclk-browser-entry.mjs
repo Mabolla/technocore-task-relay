@@ -153,6 +153,11 @@ export function expectedPaperClaim(offer, accept, secret) {
   return { ...lock, lockedValue: lock.value, value: `tclkpaper1 claimed ${offer.lock} ${accept.statement} ${offer.refundAfterMs} ${secret}` };
 }
 
+export function expectedPaperRefund(offer, accept) {
+  const lock = expectedPaperLock(offer, accept);
+  return { ...lock, lockedValue: lock.value, value: `tclkpaper1 refunded ${offer.lock} ${accept.statement} ${offer.refundAfterMs}` };
+}
+
 export function classifyPaperRecord(raw, offer, accept) {
   const record = decodePaperRecord(raw);
   if (!record || record.lock !== offer.lock || record.statement !== accept.statement || record.refundAfterMs !== offer.refundAfterMs) return "invalid";
@@ -164,8 +169,14 @@ export function makePayeeReveal(accept, from, secret) {
   return { frame, line: encodeFrame(frame), room: dealRoom(accept.contract) };
 }
 
-export function makePayeeReceipt(accept, from) {
-  const frame = { type: "receipt", from, contract: accept.contract, outcome: "claimed", rail: "paper", ref: accept.contract };
+export function makePayeeReceipt(accept, from, outcome = "claimed") {
+  if (outcome !== "claimed" && outcome !== "refunded") throw new Error("A terminal receipt outcome is required");
+  const frame = { type: "receipt", from, contract: accept.contract, outcome, rail: "paper", ref: accept.contract };
+  return { frame, line: encodeFrame(frame), room: dealRoom(accept.contract) };
+}
+
+export function makePayerRefund(accept, from) {
+  const frame = { type: "refund", from, contract: accept.contract };
   return { frame, line: encodeFrame(frame), room: dealRoom(accept.contract) };
 }
 
