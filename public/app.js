@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { OFFER_ROOM, classifyPaperRecord, encodeFrame, expectedPaperClaim, expectedPaperLock, findValidAccept, foldPayeeDeal, listSafePaperOffers, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makeSimpleVerificationOffer, verifyAcceptRecord, verifyBoundJobSpec } from "./tclk-official.js";
+import { OFFER_ROOM, classifyPaperRecord, encodeFrame, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listSafePaperOffers, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, makeSimpleVerificationOffer, verifyAcceptRecord, verifyBoundJobSpec } from "./tclk-official.js";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -100,17 +100,21 @@ function renderPayerDeal() {
   const deal = readPayerDeal();
   $("#open-payer-room").disabled = !deal;
   $("#check-payer-deal").disabled = !deal;
-  $("#publish-payer-receipt").disabled = !(deal?.state === "claimed" && deal?.railState === "claimed");
+  const terminal = (deal?.state === "claimed" && deal?.railState === "claimed") || (deal?.state === "refunded" && deal?.railState === "refunded");
+  $("#refund-payer-deal").disabled = !(deal?.state === "locked" && deal?.railState === "locked" && Date.now() >= deal.offer.refundAfterMs);
+  $("#publish-payer-receipt").disabled = !terminal;
   if (!deal) {
     $("#payer-deal-status").textContent = "No active payer deal saved in this browser.";
     return;
   }
   const state = deal.state || "accepted / lock prepared";
   const rail = deal.railState || "check required";
-  const next = state === "claimed" && rail === "claimed"
-    ? "NEXT: Sign the claimed receipt to close the deal."
+  const next = (state === "claimed" && rail === "claimed") || (state === "refunded" && rail === "refunded")
+    ? "NEXT: Sign the terminal receipt to archive the outcome."
     : state === "claimed"
       ? "NEXT: Wait for the payee to advance PaperRail, then check again."
+      : state === "locked" && rail === "locked" && Date.now() >= deal.offer.refundAfterMs
+        ? "NEXT: The deadline passed without reveal. Refund the expired deal."
       : "NEXT: Wait for the payee's signed result/reveal, then press CHECK RESULT / REVEAL.";
   $("#payer-deal-status").textContent = `Contract: ${deal.accept.contract}\nCounterparty: ${deal.accept.from}\nDeal room: /r/${deal.lock.room}\nTranscript state: ${state}\nPaperRail state: ${rail}\n${next}`;
 }
@@ -454,15 +458,41 @@ $("#check-payer-deal").addEventListener("click", async () => {
 
 $("#publish-payer-receipt").addEventListener("click", async () => {
   const identity = readIdentity(); const deal = readPayerDeal();
-  if (!identity || deal?.state !== "claimed" || deal?.railState !== "claimed") return;
-  const receipt = makePayeeReceipt(deal.accept, identity.did);
-  if (!window.confirm(`Close this completed payer deal with a signed claimed receipt?\n\n${receipt.line}`)) return;
+  const terminal = (deal?.state === "claimed" && deal?.railState === "claimed") || (deal?.state === "refunded" && deal?.railState === "refunded");
+  if (!identity || !terminal) return;
+  const receipt = makePayeeReceipt(deal.accept, identity.did, deal.state);
+  if (!window.confirm(`Archive this terminal payer deal with a signed ${deal.state} receipt?\n\n${receipt.line}`)) return;
   const nonce = Date.now(); const signature = await sign(identity, receipt.room, nonce, receipt.line);
   window.open(signedUrl(receipt.room, identity, signature, nonce, receipt.line), "_blank", "noopener,noreferrer");
   deal.receiptSubmittedAt = new Date().toISOString();
   localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify(deal));
   renderPayerDeal();
   notice("Payer receipt opened for Technocore confirmation");
+});
+
+$("#refund-payer-deal").addEventListener("click", async () => {
+  const identity = readIdentity(); const deal = readPayerDeal();
+  if (!identity || !deal || Date.now() < deal.offer.refundAfterMs) return;
+  try {
+    const roomResponse = await fetch(`https://technocore.chat/r/${deal.lock.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" } });
+    if (!roomResponse.ok) throw new Error(`Deal room read failed (${roomResponse.status})`);
+    const folded = await foldPayeeDeal(await roomResponse.json(), deal.offer, deal.accept);
+    if (folded.state.status !== "locked") throw new Error(`Refund blocked: transcript is ${folded.state.status}, not locked`);
+    const refundRail = expectedPaperRefund(deal.offer, deal.accept);
+    const noteResponse = await fetch(`https://technocore.chat/kv/${refundRail.note.ns}/${refundRail.note.key}?n=${Date.now()}`);
+    if (!noteResponse.ok || classifyPaperRecord(stripNoteBanner(await noteResponse.text()), deal.offer, deal.accept) !== "locked") throw new Error("Refund blocked: PaperRail is not in the expected locked state");
+    const refund = makePayerRefund(deal.accept, identity.did);
+    if (!window.confirm(`The refund deadline passed and no valid reveal exists. Refund this value-free PAPER deal and publish the signed terminal frame?\n\n${refund.line}`)) return;
+    const railUrl = `https://technocore.chat/kv/${refundRail.note.ns}/${refundRail.note.key}/set/${encodeURIComponent(refundRail.value)}?if=${encodeURIComponent(refundRail.lockedValue)}`;
+    const railResponse = await fetch(railUrl);
+    if (!railResponse.ok) throw new Error(`PaperRail refund failed (${railResponse.status})`);
+    const nonce = Date.now(); const signature = await sign(identity, refund.room, nonce, refund.line);
+    window.open(signedUrl(refund.room, identity, signature, nonce, refund.line), "_blank", "noopener,noreferrer");
+    deal.railState = "refunded"; deal.refundSubmittedAt = new Date().toISOString();
+    localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify(deal));
+    renderPayerDeal();
+    notice("PaperRail refunded; confirm the signed refund on Technocore, then check the deal");
+  } catch (error) { $("#payer-deal-status").textContent = `${error.message}\nSaved deal data was preserved.`; }
 });
 
 const readPayeeDeal = () => { try { return JSON.parse(localStorage.getItem(PAYEE_DEAL_KEY)); } catch { return null; } };
