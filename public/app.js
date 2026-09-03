@@ -773,13 +773,17 @@ function renderPayerDeal() {
   $("#publish-payer-receipt").disabled = !terminal;
   const deliveryStatus = $("#payer-delivery-status");
   const approveDelivery = $("#approve-payer-delivery");
-  approveDelivery.checked = Boolean(deal?.deliverySeq != null && String(deal.manualDeliveryApprovedSeq) === String(deal.deliverySeq));
-  approveDelivery.disabled = !(claimedTerminal && deal?.deliveryReviewAllowed);
-  deliveryStatus.textContent = !deal
-    ? "No signed delivery checked."
-    : deal.deliverySeq == null
-      ? "BLOCKED · No signed non-tclk result from the accepted payee was verified before reveal."
-      : `${deal.deliveryEvaluation?.ok ? "PASSED" : deal.deliveryReviewAllowed ? "HUMAN REVIEW REQUIRED" : "FAILED"} · SIGNED DELIVERY #${deal.deliverySeq}\n${deal.deliveryEvaluation?.reason || "Not evaluated"}\n\n${deal.deliveryPreview || ""}`;
+  if (approveDelivery) {
+    approveDelivery.checked = Boolean(deal?.deliverySeq != null && String(deal.manualDeliveryApprovedSeq) === String(deal.deliverySeq));
+    approveDelivery.disabled = !(claimedTerminal && deal?.deliveryReviewAllowed);
+  }
+  if (deliveryStatus) {
+    deliveryStatus.textContent = !deal
+      ? "No signed delivery checked."
+      : deal.deliverySeq == null
+        ? "BLOCKED · No signed non-tclk result from the accepted payee was verified before reveal."
+        : `${deal.deliveryEvaluation?.ok ? "PASSED" : deal.deliveryReviewAllowed ? "HUMAN REVIEW REQUIRED" : "FAILED"} · SIGNED DELIVERY #${deal.deliverySeq}\n${deal.deliveryEvaluation?.reason || "Not evaluated"}\n\n${deal.deliveryPreview || ""}`;
+  }
   if (!deal) {
     $("#payer-deal-status").textContent = "No active payer deal saved in this browser.";
     return;
@@ -809,7 +813,7 @@ function renderPayerDeal() {
   $("#payer-deal-status").textContent = `Contract: ${deal.accept.contract}\nCounterparty: ${deal.accept.from}\nDeal room: /r/${deal.lock.room}${seqs}\nTranscript state: ${state}\nPaperRail state: ${rail}\n${next}`;
 }
 
-$("#approve-payer-delivery").addEventListener("change", (event) => {
+$("#approve-payer-delivery")?.addEventListener("change", (event) => {
   const deal = readPayerDeal();
   if (!deal?.deliveryReviewAllowed || deal.deliverySeq == null) { event.target.checked = false; return; }
   if (!event.target.checked) {
