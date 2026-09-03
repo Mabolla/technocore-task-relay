@@ -112,6 +112,9 @@ test("renders a verified tclk track record with lifecycle sequence numbers", () 
   assert.match(source, /SUCCESSFUL · DELIVERY VERIFIED/);
   assert.match(source, /CLAIMED · RECEIPT PRESENT · NO DELIVERY/);
   assert.match(source, /successfulTrackEntry/);
+  assert.match(source, /currentActivity/);
+  assert.match(source, /activityByKey/);
+  assert.match(source, /verified current or locally retained tclk record/);
 });
 
 test("keeps payee secrets browser-local and requires explicit reveal approval", () => {
