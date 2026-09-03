@@ -137,6 +137,22 @@ test("reserves the derived room before publishing a payee accept", () => {
   assert.match(source, /Job note changed after selection; accept blocked/);
 });
 
+test("auto-accepts only an explicitly armed offer after a verified room reservation", () => {
+  assert.match(source, /ARM AUTO-ACCEPT/);
+  assert.match(source, /PAYEE AUTO-ACCEPT · LOCAL KEY ONLY/);
+  assert.match(source, /PAYEE_AUTO_ACCEPT_KEY/);
+  assert.match(source, /message\.from === "server"/);
+  assert.match(source, /\^created\\s\+\\S\+/);
+  assert.match(source, /SLOT LOST AT EVENT/);
+  assert.match(source, /inspectPayeeReservation/);
+  assert.match(source, /recheckAutoAcceptOffer/);
+  assert.match(source, /signedUrl\(deal\.room/);
+  assert.match(source, /signedUrl\(OFFER_ROOM/);
+  assert.match(source, /A capacity 400 publishes no accept/);
+  assert.match(source, /Resume this exact prepared deal with auto-accept/);
+  assert.match(source, /The encrypted pending deal was preserved/);
+});
+
 test("only discards a payee deal after confirming its accept is absent", () => {
   assert.match(source, /DISCARD UNCONFIRMED DEAL/);
   assert.match(source, /verifyAcceptRecord\(await readOfferHistory\(\), deal\.offer, deal\.accept\)/);

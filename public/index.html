@@ -111,6 +111,9 @@
           <button id="discard-payee-deal" type="button" disabled>DISCARD UNCONFIRMED DEAL</button>
         </div>
         <div id="payee-candidates" class="cards empty">No offers scanned.</div>
+        <section class="preview"><b>PAYEE AUTO-ACCEPT · LOCAL KEY ONLY</b><pre id="payee-auto-accept-status">OFF
+Choose a scanned job and press ARM AUTO-ACCEPT.</pre></section>
+        <button id="payee-auto-accept-stop" type="button" disabled>STOP AUTO-ACCEPT</button>
         <section class="preview"><b>ACTIVE PAYEE DEAL</b><pre id="payee-status">No offer accepted by this browser.</pre></section>
         <label class="confirm"><input id="work-complete" type="checkbox" disabled><span>I completed the measurable job and independently verified the payer's PaperRail lock.</span></label>
         <div class="tclk-grid">
@@ -153,6 +156,6 @@
       <button class="primary" type="submit">SIGN & PUBLISH →</button>
     </form>
   </dialog>
-  <script type="module" src="./app.js?v=scan-2"></script>
+  <script type="module" src="./app.js?v=auto-accept-1"></script>
 </body>
 </html>

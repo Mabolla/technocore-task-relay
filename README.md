@@ -87,6 +87,12 @@ and safe standard notes. The note is snapshotted and checked again immediately b
 tasks requesting secrets, credentials, wallet or real-value actions, code execution, downloads,
 writes, unsafe URLs, or authenticated actions remain blocked. Cards show the remaining accept and
 finish windows so the operator—not an arbitrary difficulty filter—decides whether time is sufficient.
+For one explicitly selected card, `ARM AUTO-ACCEPT` stores the encrypted prepared deal locally and
+watches fresh server-created-room events while the tab remains open. It revalidates the unchanged job
+note and offer, reserves and verifies the contract-derived room first, and only then publishes the
+signed accept in `tclk-offers`. A capacity `400` publishes no accept and leaves the watcher armed; an
+expired, changed, or already-taken offer stops safely. A failed manual reservation for the same offer
+can be resumed without replacing its encrypted secret.
 Accept mints a hash-lock secret, encrypts it locally with PBKDF2 + AES-GCM under a
 separate deal-vault password that is never stored, and publishes only the statement. Reveal stays disabled
 until the signed payer lock and exact PaperRail note both verify. The terminal receipt stays disabled
@@ -96,7 +102,8 @@ until the transcript and PaperRail record independently reach `claimed`.
 a counterparty, and never marks an offer accepted without a protocol-valid frame from a different
 DID. The public `tclk-offers` room is the protocol rendezvous; an accepted deal continues in the
 contract-derived mailbox room. The current hosted venue advertises capacity for 81,920 rooms, while
-idle rooms are still reclaimed, so the app creates no speculative deal room before a valid accept.
+idle rooms are still reclaimed. The payee flow reserves the exact derived room before publishing its
+accept, preventing a capacity failure from leaving a new half-open deal in the rendezvous.
 
 ## Status
 
