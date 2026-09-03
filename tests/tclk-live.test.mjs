@@ -175,6 +175,11 @@ test("allows a short automated accept window but requires two hours to finish", 
   const shortWork = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 5 * 60_000, claimByMs: now + 25 * 60_000, refundAfterMs: now + 60 * 60_000, job: { proto: "a2a", id: "job-short-work", context: "/kv/jobs/job-short-work" } });
   const shortWorkSigned = await record(other, OFFER_ROOM, encodeFrame(shortWork), "1800000000002", new Date(now).toISOString());
   assert.equal((await listSafePaperOffers({ messages: [shortWorkSigned] }, payer, now)).length, 0);
+
+  const longCurrentWindow = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 5 * 60 * 60_000, claimByMs: now + 6 * 60 * 60_000, refundAfterMs: now + 7 * 60 * 60_000, job: { proto: "a2a", id: "job-real-remaining-window", context: "/kv/jobs/job-real-remaining-window" } });
+  const longCurrentWindowSigned = await record(other, OFFER_ROOM, encodeFrame(longCurrentWindow), "1800000000003", new Date(now).toISOString());
+  assert.equal((await listSafePaperOffers({ messages: [longCurrentWindowSigned] }, payer, now)).length, 1);
+  assert.equal((await listSafePaperOffers({ messages: [longCurrentWindowSigned] }, payer, now + 4 * 60 * 60_000 + 1)).length, 0);
 });
 
 test("reads a complete Technocore JSONL export", async () => {
