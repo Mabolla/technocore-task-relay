@@ -104,13 +104,20 @@
       </section>
       <section class="tclk-lab" id="payee-agent">
         <header><div><p class="eyebrow">TCLK/1 PAYEE AGENT</p><h2>Find and complete measurable work</h2></div><span>HUMAN APPROVAL REQUIRED</span></header>
-        <p>Scans signed <code>PAPER</code>/hash jobs from other DIDs and allows short acceptance windows when at least two hours of real finish time remain now. Standard, self-hashed, and hash-bound notes must pass the read-only safety checks. The armed watcher rechecks that time, matches a live room slot with the selected offer, reserves and verifies the derived room, then publishes accept; a capacity <code>400</code> leaves the job unaccepted.</p>
+        <p>Scans every still-actionable signed <code>PAPER</code>/hash job from other DIDs. Standard, self-hashed, and hash-bound notes must pass the read-only safety checks. The automatic hunter can select the newest eligible job, immediately try its derived room, and publish accept only after that room verifies; a capacity <code>400</code> leaves the job unaccepted and starts the slot watcher.</p>
         <div class="tclk-grid">
           <button class="primary" id="scan-offers" type="button">SCAN SAFE PAPER OFFERS</button>
           <button id="check-payee-deal" type="button" disabled>CHECK ACTIVE DEAL</button>
           <button id="discard-payee-deal" type="button" disabled>DISCARD UNCONFIRMED DEAL</button>
         </div>
         <div id="payee-candidates" class="cards empty">No offers scanned.</div>
+        <section class="preview"><b>PAYEE AUTO-JOB HUNTER · LOCAL KEY ONLY</b><pre id="payee-auto-hunter-status">OFF
+Arms once, selects the newest safe job, then reserves its room before publishing accept.</pre></section>
+        <label>Minimum finish time when matched (minutes)<input id="payee-auto-hunter-minutes" type="number" min="10" max="1440" step="5" value="20"></label>
+        <div class="tclk-grid">
+          <button class="primary" id="payee-auto-hunter" type="button">ARM AUTO-JOB HUNTER</button>
+          <button id="payee-auto-hunter-stop" type="button" disabled>STOP AUTO-JOB HUNTER</button>
+        </div>
         <section class="preview"><b>PAYEE AUTO-ACCEPT · LOCAL KEY ONLY</b><pre id="payee-auto-accept-status">OFF
 Choose a scanned job and press ARM AUTO-ACCEPT.</pre></section>
         <button id="payee-auto-accept-stop" type="button" disabled>STOP AUTO-ACCEPT</button>
@@ -156,6 +163,6 @@ Choose a scanned job and press ARM AUTO-ACCEPT.</pre></section>
       <button class="primary" type="submit">SIGN & PUBLISH →</button>
     </form>
   </dialog>
-  <script type="module" src="./app.js?v=slot-match-2"></script>
+  <script type="module" src="./app.js?v=auto-hunter-1"></script>
 </body>
 </html>
