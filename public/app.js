@@ -8,6 +8,7 @@ const TCLK_OFFER_KEY = "mabolla.task-relay.tclk-offer.v1";
 const TCLK_JOB_KEY = "mabolla.task-relay.tclk-job.v1";
 const TCLK_PAYER_DEAL_KEY = "mabolla.task-relay.tclk-payer-deal.v1";
 const TCLK_PAYER_DEALS_KEY = "mabolla.task-relay.tclk-payer-deals.v1";
+const PAYER_AUTOPILOT_KEY = "mabolla.task-relay.payer-autopilot.v1";
 const PAYEE_DEAL_KEY = "mabolla.task-relay.tclk-payee-deal.v1";
 const TRACK_RECORD_KEY = "mabolla.task-relay.tclk-track-record.v1";
 const CREATOR_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
@@ -98,6 +99,8 @@ const readIdentity = () => { try { return JSON.parse(localStorage.getItem(IDENTI
 const readEvents = () => { try { return JSON.parse(localStorage.getItem(EVENTS_KEY)) || []; } catch { return []; } };
 const readPayerDeal = () => { try { return JSON.parse(localStorage.getItem(TCLK_PAYER_DEAL_KEY)); } catch { return null; } };
 const readPayerDeals = () => { try { return JSON.parse(localStorage.getItem(TCLK_PAYER_DEALS_KEY)) || {}; } catch { return {}; } };
+const readPayerAutopilot = () => { try { return JSON.parse(localStorage.getItem(PAYER_AUTOPILOT_KEY)) || { armed: false }; } catch { return { armed: false }; } };
+let payerAutopilotRunning = false;
 
 function rememberPayerDeal(deal) {
   const contract = deal?.accept?.contract;
@@ -110,6 +113,153 @@ function rememberPayerDeal(deal) {
 function saveActivePayerDeal(deal) {
   localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify(deal));
   rememberPayerDeal(deal);
+}
+
+function updateStoredPayerDeal(deal) {
+  rememberPayerDeal(deal);
+  if (readPayerDeal()?.accept?.contract === deal.accept.contract) {
+    localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify(deal));
+  }
+}
+
+function pendingPayerDeals() {
+  const active = readPayerDeal();
+  if (active) rememberPayerDeal(active);
+  return Object.values(readPayerDeals())
+    .filter((deal) => deal?.offer && deal?.accept && deal?.lock)
+    .filter((deal) => [undefined, "accepted", "lock-submitted", "lock-submission-opened"].includes(deal.state))
+    .filter((deal) => Date.now() < deal.offer.refundAfterMs)
+    .sort((left, right) => left.offer.refundAfterMs - right.offer.refundAfterMs);
+}
+
+function renderPayerAutopilot() {
+  const state = readPayerAutopilot();
+  const deals = Object.values(readPayerDeals()).filter((deal) => deal?.accept?.contract);
+  const pending = pendingPayerDeals();
+  $("#payer-autopilot").textContent = state.armed ? "STOP PAYER AUTO-PUBLISH" : "ARM PAYER AUTO-PUBLISH";
+  $("#payer-autopilot-status").textContent = `${state.armed ? "ARMED · TAB MUST STAY OPEN" : "OFF"}\n${deals.length ? deals.map((deal) => {
+    const seq = deal.offerSeq ? `OFFER #${deal.offerSeq}` : deal.accept.contract.slice(0, 14) + "…";
+    const status = deal.state === "locked" ? "LOCK VERIFIED" : Date.now() >= deal.offer.refundAfterMs ? "REFUND WINDOW PASSED" : deal.autoPublishStatus || "WAITING";
+    return `${seq}: ${status}`;
+  }).join("\n") : "No saved payer deals."}${state.armed ? `\nPending: ${pending.length} · watching server-created room events` : ""}`;
+}
+
+async function verifyPaperRailForAutopilot(deal) {
+  const noteUrl = `https://technocore.chat/kv/${deal.lock.note.ns}/${deal.lock.note.key}`;
+  let response = await fetch(`${noteUrl}?n=${Date.now()}`, { cache: "no-store" });
+  if (response.ok) {
+    if (stripNoteBanner(await response.text()) !== deal.lock.value) throw new Error("PaperRail note has different terms");
+  } else if (response.status === 404) {
+    response = await fetch(`${noteUrl}/set/${encodeURIComponent(deal.lock.value)}?if_absent=1&n=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok && response.status !== 409) throw new Error(`PaperRail creation failed (${response.status})`);
+    const verified = await fetch(`${noteUrl}?n=${Date.now()}`, { cache: "no-store" });
+    if (!verified.ok || stripNoteBanner(await verified.text()) !== deal.lock.value) throw new Error("PaperRail creation was not verified");
+  } else throw new Error(`PaperRail read failed (${response.status})`);
+  deal.railState = "locked";
+  updateStoredPayerDeal(deal);
+}
+
+async function inspectPayerDealRoom(deal) {
+  const response = await fetch(`https://technocore.chat/r/${deal.lock.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+  if (response.status === 404) return { exists: false, locked: false };
+  if (!response.ok) throw new Error(`Deal-room preflight failed (${response.status})`);
+  const folded = await foldPayeeDeal(await response.json(), deal.offer, deal.accept);
+  if (["locked", "claimed", "refunded"].includes(folded.state.status)) {
+    deal.state = folded.state.status;
+    deal.railState = "locked";
+    deal.autoPublishStatus = "LOCK VERIFIED IN DEAL ROOM";
+    deal.checkedAt = new Date().toISOString();
+    updateStoredPayerDeal(deal);
+    return { exists: true, locked: true };
+  }
+  return { exists: true, locked: false };
+}
+
+async function tryAutoPublishPayerLock(deal, eventSeq) {
+  const identity = readIdentity();
+  if (!identity || identity.did !== deal.offer.from) throw new Error("Local DID does not match the payer");
+  if (Date.now() >= deal.offer.refundAfterMs) throw new Error("Refund window passed");
+  const existing = await inspectPayerDealRoom(deal);
+  if (existing.locked) return true;
+  if (deal.lastPublishReturnedOkAt && Date.now() - Date.parse(deal.lastPublishReturnedOkAt) < 60_000) {
+    deal.autoPublishStatus = "PUBLISH RETURNED OK · VERIFYING TRANSCRIPT";
+    updateStoredPayerDeal(deal);
+    return false;
+  }
+  await verifyPaperRailForAutopilot(deal);
+  const nonce = Date.now();
+  const signature = await sign(identity, deal.lock.room, nonce, deal.lock.line);
+  const response = await fetch(signedUrl(deal.lock.room, identity, signature, nonce, deal.lock.line), { cache: "no-store" });
+  const result = clean(await response.text());
+  if (!response.ok) {
+    if (response.status === 400 && /room limit reached/i.test(result)) {
+      deal.state = "lock-submission-opened";
+      deal.autoPublishStatus = `SLOT LOST AT EVENT #${eventSeq} · WAITING`;
+      updateStoredPayerDeal(deal);
+      return false;
+    }
+    throw new Error(`Signed lock rejected (${response.status}${result ? `: ${result.slice(0, 120)}` : ""})`);
+  }
+  deal.lastPublishReturnedOkAt = new Date().toISOString();
+  updateStoredPayerDeal(deal);
+  let confirmed = false;
+  for (let attempt = 0; attempt < 3 && !confirmed; attempt += 1) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 500));
+    confirmed = (await inspectPayerDealRoom(deal)).locked;
+  }
+  if (!confirmed) {
+    deal.autoPublishStatus = "PUBLISH RETURNED OK · VERIFYING TRANSCRIPT";
+    updateStoredPayerDeal(deal);
+    return false;
+  }
+  deal.autoPublishStatus = `LOCK VERIFIED AT EVENT #${eventSeq}`;
+  updateStoredPayerDeal(deal);
+  return true;
+}
+
+async function runPayerAutopilot() {
+  if (payerAutopilotRunning || !readPayerAutopilot().armed) return;
+  payerAutopilotRunning = true;
+  try {
+    while (readPayerAutopilot().armed) {
+      const state = readPayerAutopilot();
+      const response = await fetch(`https://technocore.chat/r/events?since=${state.cursor}&wait=10&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+      if (!response.ok) throw new Error(`Event stream failed (${response.status})`);
+      const payload = await response.json();
+      const messages = Array.isArray(payload.messages) ? payload.messages : [];
+      for (const message of messages) if (Number.isFinite(message.seq) && message.seq > state.cursor) state.cursor = message.seq;
+      state.lastPollAt = new Date().toISOString();
+      localStorage.setItem(PAYER_AUTOPILOT_KEY, JSON.stringify(state));
+      const created = messages.find((message) => message.from === "server" && /^created\s+\S+/.test(String(message.text || "")));
+      if (created) {
+        for (const deal of pendingPayerDeals()) {
+          try { await tryAutoPublishPayerLock(deal, created.seq); }
+          catch (error) {
+            deal.autoPublishStatus = `BLOCKED: ${error.message}`;
+            updateStoredPayerDeal(deal);
+          }
+        }
+        if (!pendingPayerDeals().length) {
+          state.armed = false;
+          localStorage.setItem(PAYER_AUTOPILOT_KEY, JSON.stringify(state));
+          notice("All eligible payer locks are verified or expired; auto-publish stopped");
+        }
+        renderPayerDeal();
+      }
+      renderPayerAutopilot();
+      await new Promise((resolve) => setTimeout(resolve, 750));
+    }
+  } catch (error) {
+    const state = readPayerAutopilot();
+    state.lastError = error.message;
+    state.lastErrorAt = new Date().toISOString();
+    localStorage.setItem(PAYER_AUTOPILOT_KEY, JSON.stringify(state));
+    $("#payer-autopilot-status").textContent = `ARMED · TEMPORARY ERROR\n${error.message}\nRetrying in 10 seconds.`;
+    setTimeout(() => { payerAutopilotRunning = false; void runPayerAutopilot(); }, 10_000);
+    return;
+  } finally {
+    if (!readPayerAutopilot().armed) payerAutopilotRunning = false;
+  }
 }
 
 function renderPayerDeal() {
@@ -766,6 +916,42 @@ async function syncTrackRecord({ announce = true } = {}) {
 
 $("#refresh-track-record").addEventListener("click", () => syncTrackRecord());
 
+$("#payer-autopilot").addEventListener("click", async () => {
+  const current = readPayerAutopilot();
+  if (current.armed) {
+    localStorage.setItem(PAYER_AUTOPILOT_KEY, JSON.stringify({ ...current, armed: false, stoppedAt: new Date().toISOString() }));
+    renderPayerAutopilot();
+    notice("Payer auto-publish stopped locally");
+    return;
+  }
+  const deals = pendingPayerDeals();
+  if (!deals.length) { notice("No unexpired accepted payer deals are ready for auto-publish"); return; }
+  if (!window.confirm(`Arm local auto-publish for ${deals.length} pending payer deal${deals.length === 1 ? "" : "s"}?\n\nWhile this tab stays open, Task Relay may create an exact missing PAPER note and sign/publish each saved payer lock when a server-created room event appears. The DID key stays in this browser.`)) return;
+  try {
+    const tail = await fetch(`https://technocore.chat/r/events?format=json&limit=1&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+    if (!tail.ok) throw new Error(`Event cursor failed (${tail.status})`);
+    const payload = await tail.json();
+    const cursor = Number(payload.last_seq || payload.messages?.at(-1)?.seq || 0);
+    localStorage.setItem(PAYER_AUTOPILOT_KEY, JSON.stringify({ armed: true, cursor, armedAt: new Date().toISOString() }));
+    for (const deal of deals) {
+      deal.autoPublishStatus = "ARMED · WAITING FOR NEW ROOM EVENT";
+      updateStoredPayerDeal(deal);
+    }
+    for (const deal of deals) {
+      try {
+        const room = await inspectPayerDealRoom(deal);
+        if (room.exists && !room.locked) await tryAutoPublishPayerLock(deal, "EXISTING ROOM");
+      } catch (error) {
+        deal.autoPublishStatus = `PREFLIGHT BLOCKED: ${error.message}`;
+        updateStoredPayerDeal(deal);
+      }
+    }
+    renderPayerAutopilot();
+    notice(`${deals.length} payer deal${deals.length === 1 ? "" : "s"} armed for local auto-publish`);
+    void runPayerAutopilot();
+  } catch (error) { $("#payer-autopilot-status").textContent = `Auto-publish was not armed: ${error.message}`; }
+});
+
 $("#check-payee-deal").addEventListener("click", async () => {
   const deal = readPayeeDeal(); if (!deal) return;
   try {
@@ -896,6 +1082,8 @@ if (localStorage.getItem(TCLK_OFFER_KEY)) { $("#check-tclk").disabled = false; }
 if (localStorage.getItem(TCLK_PAYER_DEAL_KEY)) { $("#create-paper-lock").disabled = false; }
 renderPayerDeal();
 renderTrackRecord();
+renderPayerAutopilot();
+if (readPayerAutopilot().armed) void runPayerAutopilot();
 if (readIdentity()) void syncTrackRecord({ announce: false });
 if (readPayeeDeal()) {
   const payeeDeal = readPayeeDeal();

@@ -173,6 +173,18 @@ test("restores any accepted payer deal from verified history without losing the 
   assert.match(source, /ACCEPT #\$\{entry\.acceptSeq/);
 });
 
+test("auto-publishes saved payer locks only after a fresh server-created room event", () => {
+  assert.match(source, /PAYER LOCK AUTO-PUBLISH · LOCAL KEY ONLY/);
+  assert.match(source, /ARM PAYER AUTO-PUBLISH/);
+  assert.match(source, /message\.from === "server"/);
+  assert.match(source, /\^created\\s\+\\S\+/);
+  assert.match(source, /identity\.did !== deal\.offer\.from/);
+  assert.match(source, /room limit reached/);
+  assert.match(source, /PUBLISH RETURNED OK · VERIFYING TRANSCRIPT/);
+  assert.match(source, /inspectPayerDealRoom/);
+  assert.match(source, /All eligible payer locks are verified or expired/);
+});
+
 test("refunds an expired locked payer deal before issuing its terminal receipt", () => {
   assert.match(source, /REFUND EXPIRED DEAL/);
   assert.match(source, /Date\.now\(\) >= deal\.offer\.refundAfterMs/);
