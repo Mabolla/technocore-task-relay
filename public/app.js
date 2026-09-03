@@ -1606,7 +1606,12 @@ async function syncTrackRecord({ announce = true } = {}) {
   const button = $("#refresh-track-record"); button.disabled = true;
   $("#track-sync-status").textContent = "Reading verified Technocore history…";
   try {
-    const activity = await listMyPaperActivity(await readOfferHistory(), identity.did);
+    const currentActivity = await listMyPaperActivity(await readOfferHistory(), identity.did);
+    const activityByKey = new Map(currentActivity.map((entry) => [trackKey(entry), entry]));
+    for (const saved of readTrackRecords()) {
+      if (saved?.offer && saved?.accept && !activityByKey.has(trackKey(saved))) activityByKey.set(trackKey(saved), { ...saved });
+    }
+    const activity = [...activityByKey.values()];
     for (const entry of activity) {
       let roomPayload = null;
       if (entry.accept && entry.room) {
@@ -1642,7 +1647,7 @@ async function syncTrackRecord({ announce = true } = {}) {
     }
     mergeTrackRecords(activity);
     $("#track-sync-status").textContent = `Verified from Technocore · ${new Date().toLocaleString()}`;
-    if (announce) notice(`${activity.length} verified tclk record${activity.length === 1 ? "" : "s"} refreshed`);
+    if (announce) notice(`${activity.length} verified current or locally retained tclk record${activity.length === 1 ? "" : "s"} refreshed`);
   } catch (error) {
     $("#track-sync-status").textContent = `History refresh failed: ${error.message}. Saved records were preserved.`;
   } finally { button.disabled = false; }
