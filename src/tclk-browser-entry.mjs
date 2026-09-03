@@ -243,10 +243,10 @@ export async function listSafePaperOffers(raw, myDid, now = Date.now()) {
   for (const { record, frame } of decoded) {
     if (frame?.type !== "offer" || frame.from === myDid || frame.role !== "payer") continue;
     if (frame.asset !== "PAPER" || frame.lock !== "hash" || !frame.rails.includes("paper")) continue;
-    // Accept may be short because the armed watcher reacts immediately. The
-    // finish window must still leave time for the payer lock and real work,
-    // even if the room slot arrives near the acceptance deadline.
-    if (!frame.job?.id || !frame.job.context || frame.expiresMs <= now || frame.claimByMs < frame.expiresMs + minWorkAfterAcceptMs) continue;
+    // Accept may be short because the armed watcher reacts immediately. Check
+    // the real remaining finish time both during scan and again when a room
+    // event arrives, instead of imposing an arbitrary deadline-gap rule.
+    if (!frame.job?.id || !frame.job.context || frame.expiresMs <= now || frame.claimByMs < now + minWorkAfterAcceptMs) continue;
     const safeContext = frame.job.context.startsWith("https://technocore.chat/") || /^\/kv\/[a-z0-9][a-z0-9_-]{0,47}\/[a-z0-9][a-z0-9_-]{0,47}$/.test(frame.job.context);
     if (!safeContext) continue;
     if (record.from !== frame.from || !(await validTransportSignature(record, OFFER_ROOM))) continue;
