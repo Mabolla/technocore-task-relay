@@ -245,7 +245,8 @@ export async function listSafePaperOffers(raw, myDid, now = Date.now(), minimumF
     // Manual scans show every still-actionable safe job. Automated hunters may
     // pass a minimum real finish window and recheck it at the acceptance moment.
     if (!frame.job?.id || !frame.job.context || frame.expiresMs <= now || frame.claimByMs <= now || frame.claimByMs < now + minimumFinishMs) continue;
-    const safeContext = frame.job.context.startsWith("https://technocore.chat/") || /^\/kv\/[a-z0-9][a-z0-9_-]{0,47}\/[a-z0-9][a-z0-9_-]{0,47}$/.test(frame.job.context);
+    const safeContext = /^\/kv\/[a-z0-9][a-z0-9_-]{0,47}\/[a-z0-9][a-z0-9_-]{0,47}$/.test(frame.job.context)
+      || safePublicHttpsUrl(frame.job.context);
     if (!safeContext) continue;
     if (record.from !== frame.from || !(await validTransportSignature(record, OFFER_ROOM))) continue;
     const alreadyAccepted = accepts.some(({ record: acceptRecord, frame: accept }) => {
@@ -266,12 +267,7 @@ export async function verifyBoundJobSpec(raw, offer) {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(match[2])));
   const actual = [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
   if (actual !== match[1]) return null;
-  const dangerousRequest = /(?:^|[.!?]\s*)(?:send|provide|share|upload|enter|reveal)\b[^.!?]{0,80}\b(?:secret|password|credential|private key|seed phrase|wallet|payment|real funds)\b/i;
-  const realValueRequest = /(?:^|[.!?]\s*)(?:pay|transfer)\b[^.!?]{0,80}\b(?:funds|usd|usdc|eth|flop|wallet)\b/i;
-  const externalLink = [...match[2].matchAll(/https?:\/\/[^\s]+/gi)].some(([url]) => {
-    try { return new URL(url).hostname !== "technocore.chat"; } catch { return true; }
-  });
-  if (dangerousRequest.test(match[2]) || realValueRequest.test(match[2]) || externalLink) return null;
+  if (!safeJobText(match[2])) return null;
   return { hash: actual, text: match[2] };
 }
 
@@ -280,30 +276,36 @@ async function sha256Hex(text) {
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function safePublicHttpsUrl(raw) {
+  try {
+    const url = new URL(String(raw).replace(/[.,;:!?]+$/, ""));
+    if (url.protocol !== "https:" || url.username || url.password) return false;
+    const host = url.hostname.toLowerCase();
+    if (host === "localhost" || host.endsWith(".local") || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host)) return false;
+    for (const key of url.searchParams.keys()) if (/token|secret|password|credential|auth|signature|api[_-]?key/i.test(key)) return false;
+    return true;
+  } catch { return false; }
+}
+
 function safeJobText(text) {
   const dangerousRequest = /(?:^|[.!?]\s*)(?:send|provide|share|upload|enter|reveal)\b[^.!?]{0,80}\b(?:secret|password|credential|private key|seed phrase|wallet|payment|real funds)\b/i;
   const realValueRequest = /\b(?:pay|transfer|approve|mint|swap|bridge|stake|deposit|withdraw|connect)\b[^.!?]{0,100}\b(?:fund|funds|usd|usdc|eth|flop|token|wallet|transaction)\b/i;
-  const codeExecution = /\b(?:run|execute|install)\b[^.!?]{0,60}\b(?:code|script|command|package|binary)\b/i;
   const writeAction = /\b(?:post|publish|submit|upload|message|email|comment|reply|edit|delete|register|sign in|log in)\b[^.!?]{0,100}\b(?:account|form|issue|pull request|message|comment|file|credentials?)\b/i;
-  const downloadAction = /\b(?:download|install)\b[^.!?]{0,80}\b(?:file|package|app|extension|binary|script|software)\b/i;
   const unsafeUrl = [...text.matchAll(/https?:\/\/[^\s<>()]+/gi)].some(([raw]) => {
-    try {
-      const url = new URL(raw.replace(/[.,;:!?]+$/, ""));
-      if (url.protocol !== "https:" || url.username || url.password) return true;
-      const host = url.hostname.toLowerCase();
-      if (host === "localhost" || host.endsWith(".local") || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host)) return true;
-      for (const key of url.searchParams.keys()) if (/token|secret|password|credential|auth|signature|api[_-]?key/i.test(key)) return true;
-      return false;
-    } catch { return true; }
+    return !safePublicHttpsUrl(raw);
   });
-  return !dangerousRequest.test(text) && !realValueRequest.test(text) && !codeExecution.test(text) && !writeAction.test(text) && !downloadAction.test(text) && !unsafeUrl;
+  // Jobs may ask for public-web research, repository review, local builds or
+  // test execution. Selecting a job never executes its instructions. Keep only
+  // the hard boundaries that could expose identity/value or mutate third-party
+  // systems; the human remains responsible for performing the accepted work.
+  return !dangerousRequest.test(text) && !realValueRequest.test(text) && !writeAction.test(text) && !unsafeUrl;
 }
 
 export async function reviewJobSpec(raw, offer) {
   const bound = await verifyBoundJobSpec(raw, offer);
   if (bound) return { ...bound, bound: true };
   const text = String(raw).split("\n").filter((line) => !line.startsWith("!!") && line.trim()).join("\n").trim();
-  if (text.length < 20 || text.length > 5000) return null;
+  if (text.length < 20 || text.length > 20_000) return null;
   if (text.startsWith("job-spec-v1 ")) {
     const declared = text.match(/^job-spec-v1 sha256=([0-9a-f]{64}) \| (.+)$/s);
     if (!declared || await sha256Hex(declared[2]) !== declared[1] || !safeJobText(declared[2])) return null;
