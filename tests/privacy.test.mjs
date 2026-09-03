@@ -150,10 +150,18 @@ test("restores and advances an active payer deal after refresh", () => {
   assert.match(source, /ACTIVE PAYER DEAL · SURVIVES REFRESH/);
   assert.match(source, /readPayerDeal/);
   assert.match(source, /renderPayerDeal\(\)/);
-  assert.match(source, /CHECK RESULT \/ REVEAL/);
+  assert.match(source, /VERIFY LOCK \/ CHECK RESULT/);
   assert.match(source, /foldPayeeDeal\(await roomResponse\.json\(\), deal\.offer, deal\.accept\)/);
   assert.match(source, /SIGN CLAIMED RECEIPT/);
   assert.match(source, /Payer receipt opened for Technocore confirmation/);
+});
+
+test("does not report an opened signed-lock tab as a verified lock", () => {
+  assert.match(source, /lock submission opened — NOT VERIFIED/);
+  assert.match(source, /SIGNED LOCK SUBMISSION OPENED — NOT YET VERIFIED ON TECHNOCORE/);
+  assert.match(source, /deal\.state = "lock-submission-opened"/);
+  assert.match(source, /SIGNED LOCK IS NOT CONFIRMED/);
+  assert.doesNotMatch(source, /deal\.state = "lock-submitted"/);
 });
 
 test("refunds an expired locked payer deal before issuing its terminal receipt", () => {

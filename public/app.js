@@ -99,6 +99,7 @@ const readPayerDeal = () => { try { return JSON.parse(localStorage.getItem(TCLK_
 
 function renderPayerDeal() {
   const deal = readPayerDeal();
+  const lockSubmissionPending = deal?.state === "lock-submitted" || deal?.state === "lock-submission-opened";
   $("#open-payer-room").disabled = !deal;
   $("#check-payer-deal").disabled = !deal;
   const terminal = (deal?.state === "claimed" && deal?.railState === "claimed") || (deal?.state === "refunded" && deal?.railState === "refunded");
@@ -108,15 +109,19 @@ function renderPayerDeal() {
     $("#payer-deal-status").textContent = "No active payer deal saved in this browser.";
     return;
   }
-  const state = deal.state || "accepted / lock prepared";
+  const state = lockSubmissionPending ? "lock submission opened — NOT VERIFIED" : (deal.state || "accepted / lock prepared");
   const rail = deal.railState || "check required";
   const next = (state === "claimed" && rail === "claimed") || (state === "refunded" && rail === "refunded")
     ? "NEXT: Sign the terminal receipt to archive the outcome."
+    : lockSubmissionPending
+      ? "NEXT: The signed lock is not confirmed on Technocore. If its tab returned 400, wait for a slot and press VERIFY & PUBLISH SIGNED LOCK again. After Technocore says ok, press VERIFY LOCK / CHECK RESULT."
+    : state === "accepted" || state === "accepted / lock prepared"
+      ? "NEXT: The deal is accepted, but its signed lock is not in the deal-room transcript. Create or verify PaperRail, then press VERIFY & PUBLISH SIGNED LOCK."
     : state === "claimed"
       ? "NEXT: Wait for the payee to advance PaperRail, then check again."
       : state === "locked" && rail === "locked" && Date.now() >= deal.offer.refundAfterMs
         ? "NEXT: The deadline passed without reveal. Refund the expired deal."
-      : "NEXT: Wait for the payee's signed result/reveal, then press CHECK RESULT / REVEAL.";
+      : "NEXT: Wait for the payee's signed result/reveal, then press VERIFY LOCK / CHECK RESULT.";
   $("#payer-deal-status").textContent = `Contract: ${deal.accept.contract}\nCounterparty: ${deal.accept.from}\nDeal room: /r/${deal.lock.room}\nTranscript state: ${state}\nPaperRail state: ${rail}\n${next}`;
 }
 const agentNameOf = (identity) => identity?.agentName || (identity?.did === CREATOR_DID ? "Mabolla Agent" : "Task Relay Agent");
@@ -457,7 +462,10 @@ $("#create-paper-lock").addEventListener("click", async () => {
     const current = await fetch(`https://technocore.chat/kv/${deal.lock.note.ns}/${deal.lock.note.key}?n=${Date.now()}`);
     if (current.ok) {
       if (stripNoteBanner(await current.text()) !== deal.lock.value) throw new Error("PaperRail note already exists with different terms");
+      deal.railState = "locked";
+      localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify(deal));
       $("#publish-payer-lock").disabled = false;
+      renderPayerDeal();
       notice("Exact PaperRail lock already exists and is ready to verify");
       return;
     }
@@ -480,8 +488,8 @@ $("#publish-payer-lock").addEventListener("click", async () => {
     if (!window.confirm(`PaperRail is verified. Publish this exact signed lock to /r/${deal.lock.room}?\n\n${deal.lock.line}`)) return;
     const nonce = Date.now(); const signature = await sign(identity, deal.lock.room, nonce, deal.lock.line);
     window.open(signedUrl(deal.lock.room, identity, signature, nonce, deal.lock.line), "_blank", "noopener,noreferrer");
-    $("#tclk-live-result").textContent = `PAPER RAIL VERIFIED · SIGNED LOCK SUBMISSION OPENED\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.lock.room}\nPaper note: /kv/${deal.lock.note.ns}/${deal.lock.note.key}\n\n${deal.lock.line}`;
-    deal.state = "lock-submitted"; deal.lockSubmittedAt = new Date().toISOString();
+    $("#tclk-live-result").textContent = `SIGNED LOCK SUBMISSION OPENED — NOT YET VERIFIED ON TECHNOCORE\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.lock.room}\nPaper note: /kv/${deal.lock.note.ns}/${deal.lock.note.key}\n\n${deal.lock.line}\n\nNEXT: Confirm the opened Technocore tab says ok, then press VERIFY LOCK / CHECK RESULT. If it says 400, the signed lock was not published.`;
+    deal.state = "lock-submission-opened"; deal.railState = "locked"; deal.lockSubmittedAt = new Date().toISOString();
     localStorage.setItem(TCLK_PAYER_DEAL_KEY, JSON.stringify(deal));
     renderPayerDeal();
     notice("Signed payer lock opened for Technocore confirmation");
@@ -509,7 +517,8 @@ $("#check-payer-deal").addEventListener("click", async () => {
     notice(folded.state.status === "claimed" ? "Valid payee reveal found" : "No valid payee reveal yet");
     void syncTrackRecord({ announce: false });
   } catch (error) {
-    $("#payer-deal-status").textContent = `Payer deal check failed: ${error.message}\nSaved deal data was preserved.`;
+    const pending = deal.state === "lock-submitted" || deal.state === "lock-submission-opened";
+    $("#payer-deal-status").textContent = `Payer deal check failed: ${error.message}\nSaved deal data was preserved.${pending ? "\nSIGNED LOCK IS NOT CONFIRMED. If the publish tab returned 400, wait for a slot and retry VERIFY & PUBLISH SIGNED LOCK." : ""}`;
   }
 });
 
