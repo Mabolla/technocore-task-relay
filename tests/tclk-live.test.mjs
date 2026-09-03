@@ -166,20 +166,21 @@ test("builds payer and payee track records from verified rendezvous frames", asy
   assert.equal(summary.status, "locked"); assert.equal(summary.seqs.lock, 103);
 });
 
-test("allows a short automated accept window but requires two hours to finish", async () => {
+test("supports a configurable real finish-time threshold for automated hunting", async () => {
   const now = 1_800_000_000_000; const other = await signer();
   const offer = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 5 * 60_000, claimByMs: now + 125 * 60_000, refundAfterMs: now + 3 * 60 * 60_000, job: { proto: "a2a", id: "job-short-accept-long-work", context: "/kv/jobs/job-short-accept-long-work" } });
   const signed = await record(other, OFFER_ROOM, encodeFrame(offer), "1800000000001", new Date(now).toISOString());
-  assert.equal((await listSafePaperOffers({ messages: [signed] }, payer, now)).length, 1);
+  assert.equal((await listSafePaperOffers({ messages: [signed] }, payer, now, 2 * 60 * 60_000)).length, 1);
   assert.equal((await listSafePaperOffers({ messages: [signed] }, payer, now + 5 * 60_000 + 1)).length, 0);
   const shortWork = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 5 * 60_000, claimByMs: now + 25 * 60_000, refundAfterMs: now + 60 * 60_000, job: { proto: "a2a", id: "job-short-work", context: "/kv/jobs/job-short-work" } });
   const shortWorkSigned = await record(other, OFFER_ROOM, encodeFrame(shortWork), "1800000000002", new Date(now).toISOString());
-  assert.equal((await listSafePaperOffers({ messages: [shortWorkSigned] }, payer, now)).length, 0);
+  assert.equal((await listSafePaperOffers({ messages: [shortWorkSigned] }, payer, now)).length, 1);
+  assert.equal((await listSafePaperOffers({ messages: [shortWorkSigned] }, payer, now, 2 * 60 * 60_000)).length, 0);
 
   const longCurrentWindow = makeOffer({ from: other.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 5 * 60 * 60_000, claimByMs: now + 6 * 60 * 60_000, refundAfterMs: now + 7 * 60 * 60_000, job: { proto: "a2a", id: "job-real-remaining-window", context: "/kv/jobs/job-real-remaining-window" } });
   const longCurrentWindowSigned = await record(other, OFFER_ROOM, encodeFrame(longCurrentWindow), "1800000000003", new Date(now).toISOString());
-  assert.equal((await listSafePaperOffers({ messages: [longCurrentWindowSigned] }, payer, now)).length, 1);
-  assert.equal((await listSafePaperOffers({ messages: [longCurrentWindowSigned] }, payer, now + 4 * 60 * 60_000 + 1)).length, 0);
+  assert.equal((await listSafePaperOffers({ messages: [longCurrentWindowSigned] }, payer, now, 2 * 60 * 60_000)).length, 1);
+  assert.equal((await listSafePaperOffers({ messages: [longCurrentWindowSigned] }, payer, now + 4 * 60 * 60_000 + 1, 2 * 60 * 60_000)).length, 0);
 });
 
 test("reads a complete Technocore JSONL export", async () => {
