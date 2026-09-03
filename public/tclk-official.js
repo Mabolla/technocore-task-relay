@@ -3241,7 +3241,14 @@ function makeLivePaperOffer({ from, jobId, now = Date.now() }) {
   });
 }
 function records(raw) {
-  const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+  let parsed = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = raw.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => JSON.parse(line));
+    }
+  }
   if (Array.isArray(parsed)) return parsed;
   if (Array.isArray(parsed?.messages)) return parsed.messages;
   throw new Error("Technocore response has no messages array");
@@ -3302,6 +3309,14 @@ async function verifyAcceptRecord(raw, offer, accept, now = Date.now()) {
     if (record.from !== frame.from || !await validTransportSignature(record, OFFER_ROOM)) continue;
     const at = Number.isFinite(Date.parse(record.ts)) ? Date.parse(record.ts) : now;
     if (applyFrame(openContract(offer), frame, at).ok) return { seq: record.seq, record, frame };
+  }
+  return null;
+}
+async function verifyExactFrameRecord(raw, expected, room) {
+  const expectedText = encodeFrame(expected);
+  for (const record of records(raw)) {
+    if (record.text !== expectedText || record.from !== expected.from) continue;
+    if (await validTransportSignature(record, room)) return { seq: record.seq ?? null, record };
   }
   return null;
 }
@@ -3375,16 +3390,27 @@ async function summarizeDealActivity(raw, offer, accept, now = Date.now()) {
   return { status: folded.state.status, room: folded.room, seqs };
 }
 async function listSafePaperOffers(raw, myDid, now = Date.now()) {
+  const decoded = records(raw).map((record) => ({ record, frame: tryDecodeFrame(record.text || "") }));
+  const accepts = [];
+  for (const item of decoded) {
+    const { record, frame } = item;
+    if (frame?.type !== "accept" || record.from !== frame.from) continue;
+    if (await validTransportSignature(record, OFFER_ROOM)) accepts.push(item);
+  }
   const offers = [];
-  for (const record of records(raw)) {
-    const frame = tryDecodeFrame(record.text || "");
+  for (const { record, frame } of decoded) {
     if (frame?.type !== "offer" || frame.from === myDid || frame.role !== "payer") continue;
     if (frame.asset !== "PAPER" || frame.lock !== "hash" || !frame.rails.includes("paper")) continue;
-    if (!frame.job?.id || !frame.job.context || frame.expiresMs <= now + 30 * 6e4 || frame.claimByMs <= now + 45 * 6e4) continue;
+    if (!frame.job?.id || !frame.job.context || frame.expiresMs <= now + 10 * 6e4 || frame.claimByMs <= now + 30 * 6e4) continue;
     const safeContext = frame.job.context.startsWith("https://technocore.chat/") || /^\/kv\/[a-z0-9][a-z0-9_-]{0,47}\/[a-z0-9][a-z0-9_-]{0,47}$/.test(frame.job.context);
     if (!safeContext) continue;
     if (record.from !== frame.from || !await validTransportSignature(record, OFFER_ROOM)) continue;
-    if (await findValidAccept(raw, frame, now)) continue;
+    const alreadyAccepted = accepts.some(({ record: acceptRecord, frame: accept }) => {
+      if (accept.ref !== frame.id || accept.from === frame.from) return false;
+      const acceptedAt = Number.isFinite(Date.parse(acceptRecord.ts)) ? Date.parse(acceptRecord.ts) : now;
+      return applyFrame(openContract(frame), accept, acceptedAt).ok;
+    });
+    if (alreadyAccepted) continue;
     offers.push({ offer: frame, seq: record.seq, ts: record.ts });
   }
   return offers.sort((a, b) => Number(b.seq) - Number(a.seq));
@@ -3407,6 +3433,30 @@ async function verifyBoundJobSpec(raw, offer) {
   });
   if (dangerousRequest.test(match[2]) || realValueRequest.test(match[2]) || externalLink) return null;
   return { hash: actual, text: match[2] };
+}
+async function sha256Hex(text) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+function safeJobText(text) {
+  const dangerousRequest = /(?:^|[.!?]\s*)(?:send|provide|share|upload|enter|reveal)\b[^.!?]{0,80}\b(?:secret|password|credential|private key|seed phrase|wallet|payment|real funds)\b/i;
+  const realValueRequest = /(?:^|[.!?]\s*)(?:pay|transfer)\b[^.!?]{0,80}\b(?:fund|funds|usd|usdc|eth|flop|wallet)\b/i;
+  const codeExecution = /\b(?:run|execute|install)\b[^.!?]{0,60}\b(?:code|script|command|package|binary)\b/i;
+  const externalLink = [...text.matchAll(/https?:\/\/[^\s]+/gi)].some(([url]) => {
+    try {
+      return new URL(url).hostname !== "technocore.chat";
+    } catch {
+      return true;
+    }
+  });
+  return !dangerousRequest.test(text) && !realValueRequest.test(text) && !codeExecution.test(text) && !externalLink;
+}
+async function reviewJobSpec(raw, offer) {
+  const bound = await verifyBoundJobSpec(raw, offer);
+  if (bound) return { ...bound, bound: true };
+  const text = String(raw).split("\n").filter((line) => !line.startsWith("!!") && line.trim()).join("\n").trim();
+  if (text.startsWith("job-spec-v1 ") || text.length < 20 || text.length > 2e3 || !safeJobText(text)) return null;
+  return { hash: await sha256Hex(text), text, bound: false };
 }
 function makePayeeAcceptance(offer, from) {
   if (offer.role !== "payer" || offer.asset !== "PAPER" || offer.lock !== "hash" || !offer.rails.includes("paper")) {
@@ -3501,9 +3551,11 @@ export {
   makePayeeReveal,
   makePayerRefund,
   makeSimpleVerificationOffer,
+  reviewJobSpec,
   summarizeDealActivity,
   verifyAcceptRecord,
-  verifyBoundJobSpec
+  verifyBoundJobSpec,
+  verifyExactFrameRecord
 };
 /*! Bundled license information:
 

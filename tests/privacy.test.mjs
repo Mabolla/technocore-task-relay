@@ -120,9 +120,19 @@ test("keeps payee secrets browser-local and requires explicit reveal approval", 
   assert.doesNotMatch(source, /localStorage\.setItem\([^\n]+prepared\.secret/);
 });
 
+test("reserves the derived room before publishing a payee accept", () => {
+  assert.match(source, /room-reservation-pending/);
+  assert.match(source, /verifyExactFrameRecord/);
+  assert.match(source, /signedUrl\(prepared\.room/);
+  assert.match(source, /signedUrl\(OFFER_ROOM/);
+  assert.match(source, /JOB NOT ACCEPTED YET/);
+  assert.match(source, /\/export\?n=/);
+  assert.match(source, /Job note changed after selection; accept blocked/);
+});
+
 test("only discards a payee deal after confirming its accept is absent", () => {
   assert.match(source, /DISCARD UNCONFIRMED DEAL/);
-  assert.match(source, /verifyAcceptRecord\(await response\.json\(\), deal\.offer, deal\.accept\)/);
+  assert.match(source, /verifyAcceptRecord\(await readOfferHistory\(\), deal\.offer, deal\.accept\)/);
   assert.match(source, /DISCARD BLOCKED — ACCEPT VERIFIED/);
   assert.match(source, /localStorage\.removeItem\(PAYEE_DEAL_KEY\)/);
   assert.match(source, /The local encrypted secret was preserved/);

@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec } from "./tclk-official.js";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord } from "./tclk-official.js";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -554,6 +554,11 @@ $("#refund-payer-deal").addEventListener("click", async () => {
 
 const readPayeeDeal = () => { try { return JSON.parse(localStorage.getItem(PAYEE_DEAL_KEY)); } catch { return null; } };
 function contextUrl(context) { return context.startsWith("/kv/") ? `https://technocore.chat${context}` : context; }
+async function readOfferHistory() {
+  const response = await fetch(`https://technocore.chat/r/${OFFER_ROOM}/export?n=${Date.now()}`, { headers: { accept: "application/x-ndjson, application/json" } });
+  if (!response.ok) throw new Error(`Technocore offer history read failed (${response.status})`);
+  return response.text();
+}
 function resetPayeeUi() {
   $("#check-payee-deal").disabled = true;
   $("#discard-payee-deal").disabled = true;
@@ -571,10 +576,10 @@ function renderPayeeOffers(items) {
     const card = document.createElement("article"); card.className = "mission";
     const id = document.createElement("code"); id.textContent = `seq #${seq} · ${offer.id.slice(0, 18)}…`;
     const title = document.createElement("h2"); title.textContent = `${offer.job.proto.toUpperCase()} · ${offer.job.id}`;
-    const detail = document.createElement("p"); detail.textContent = `${offer.amount} ${offer.asset} · hash lock · expires ${new Date(offer.expiresMs).toLocaleString()}\n${spec.text.slice(0, 600)}`;
+    const detail = document.createElement("p"); detail.textContent = `${offer.amount} ${offer.asset} · hash lock · expires ${new Date(offer.expiresMs).toLocaleString()}\n${spec.bound ? "HASH-BOUND JOB NOTE" : "SNAPSHOTTED STANDARD JOB NOTE"}\n${spec.text.slice(0, 600)}`;
     const link = document.createElement("a"); link.href = contextUrl(offer.job.context); link.target = "_blank"; link.rel = "noopener noreferrer"; link.textContent = "REVIEW JOB CONTEXT ↗";
     const accept = document.createElement("button"); accept.textContent = "ACCEPT WITH MY DID →";
-    accept.addEventListener("click", () => acceptPaperOffer(offer));
+    accept.addEventListener("click", () => acceptPaperOffer(offer, spec));
     card.append(id, title, detail, link, accept); return card;
   }) : [document.createTextNode("No safe, signed, unexpired PaperRail offers found.")]));
 }
@@ -582,21 +587,19 @@ function renderPayeeOffers(items) {
 $("#scan-offers").addEventListener("click", async () => {
   const identity = readIdentity(); if (!identity) { notice("Restore the existing DID before scanning offers"); return; }
   try {
-    const response = await fetch(`https://technocore.chat/r/${OFFER_ROOM}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" } });
-    if (!response.ok) throw new Error(`Technocore read failed (${response.status})`);
-    const offers = await listSafePaperOffers(await response.json(), identity.did);
+    const offers = await listSafePaperOffers(await readOfferHistory(), identity.did);
     const verified = [];
     for (const candidate of offers) {
       const specResponse = await fetch(`${contextUrl(candidate.offer.job.context)}?n=${Date.now()}`);
       if (!specResponse.ok) continue;
-      const spec = await verifyBoundJobSpec(await specResponse.text(), candidate.offer);
+      const spec = await reviewJobSpec(await specResponse.text(), candidate.offer);
       if (spec) verified.push({ ...candidate, spec });
     }
     renderPayeeOffers(verified); notice(`${verified.length} signed offer${verified.length === 1 ? "" : "s"} with a hash-bound safe job found`);
   } catch (error) { $("#payee-status").textContent = `Scan failed: ${error.message}`; }
 });
 
-async function acceptPaperOffer(offer) {
+async function acceptPaperOffer(offer, jobSnapshot) {
   const identity = readIdentity(); if (!identity) return;
   if (readPayeeDeal()) { notice("Finish the active payee deal before accepting another"); return; }
   const prepared = makePayeeAcceptance(offer, identity.did);
@@ -604,14 +607,14 @@ async function acceptPaperOffer(offer) {
   const vaultPassword = window.prompt("Create a separate deal-vault password (minimum 12 characters). It is not stored and cannot be recovered.");
   if (!vaultPassword || vaultPassword.length < 12) { notice("Accept cancelled — deal-vault password must be at least 12 characters"); return; }
   const sealedSecret = await sealSecret(vaultPassword, prepared.contract, prepared.secret);
-  const deal = { offer, accept: prepared.accept, room: prepared.room, sealedSecret, acceptedAt: new Date().toISOString(), state: "accept-pending" };
+  const deal = { offer, accept: prepared.accept, room: prepared.room, sealedSecret, jobSnapshot, acceptedAt: new Date().toISOString(), state: "room-reservation-pending" };
   localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
-  const nonce = Date.now(); const signature = await sign(identity, OFFER_ROOM, nonce, prepared.line);
-  window.open(signedUrl(OFFER_ROOM, identity, signature, nonce, prepared.line), "_blank", "noopener,noreferrer");
+  const nonce = Date.now(); const signature = await sign(identity, prepared.room, nonce, prepared.line);
+  window.open(signedUrl(prepared.room, identity, signature, nonce, prepared.line), "_blank", "noopener,noreferrer");
   $("#check-payee-deal").disabled = false;
   $("#discard-payee-deal").disabled = false;
-  $("#payee-status").textContent = `ACCEPT PREPARED LOCALLY — NOT YET VERIFIED ON TECHNOCORE\nContract: ${prepared.contract}\nDeal room: /r/${prepared.room}\nSecret: encrypted in this browser`;
-  notice("Accept opened for Technocore confirmation; check the deal after it is accepted");
+  $("#payee-status").textContent = `DEAL ROOM RESERVATION OPENED — JOB NOT ACCEPTED YET\nContract: ${prepared.contract}\nDeal room: /r/${prepared.room}\nSecret: encrypted in this browser\nNEXT: Confirm Technocore says ok, then press CHECK ACTIVE DEAL.`;
+  notice("Deal-room reservation opened; a 400 means stop — no accept will be published");
 }
 
 function stripNoteBanner(text) {
@@ -677,9 +680,7 @@ async function syncTrackRecord({ announce = true } = {}) {
   const button = $("#refresh-track-record"); button.disabled = true;
   $("#track-sync-status").textContent = "Reading verified Technocore history…";
   try {
-    const boardResponse = await fetch(`https://technocore.chat/r/${OFFER_ROOM}?format=json&n=${Date.now()}`, { headers: { accept: "application/json" } });
-    if (!boardResponse.ok) throw new Error(`Offer history read failed (${boardResponse.status})`);
-    const activity = await listMyPaperActivity(await boardResponse.json(), identity.did);
+    const activity = await listMyPaperActivity(await readOfferHistory(), identity.did);
     for (const entry of activity) {
       if (entry.accept && entry.room) {
         const roomResponse = await fetch(`https://technocore.chat/r/${entry.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" } });
@@ -710,9 +711,29 @@ $("#refresh-track-record").addEventListener("click", () => syncTrackRecord());
 $("#check-payee-deal").addEventListener("click", async () => {
   const deal = readPayeeDeal(); if (!deal) return;
   try {
-    const boardResponse = await fetch(`https://technocore.chat/r/${OFFER_ROOM}?limit=200&format=json&n=${Date.now()}`);
-    if (!boardResponse.ok) throw new Error(`Offer board read failed (${boardResponse.status})`);
-    const accepted = await verifyAcceptRecord(await boardResponse.json(), deal.offer, deal.accept);
+    if (deal.state === "room-reservation-pending") {
+      const identity = readIdentity(); if (!identity) return;
+      const roomResponse = await fetch(`https://technocore.chat/r/${deal.room}?limit=200&format=json&n=${Date.now()}`);
+      if (!roomResponse.ok) throw new Error(`Deal room reservation not found (${roomResponse.status})`);
+      const reserved = await verifyExactFrameRecord(await roomResponse.json(), deal.accept, deal.room);
+      if (!reserved) {
+        $("#payee-status").textContent = `DEAL ROOM NOT RESERVED — JOB NOT ACCEPTED\nContract: ${deal.accept.contract}\nIf Technocore returned 400, discard this unconfirmed local deal.`;
+        return;
+      }
+      const specResponse = await fetch(`${contextUrl(deal.offer.job.context)}?n=${Date.now()}`);
+      if (!specResponse.ok) throw new Error(`Job note recheck failed (${specResponse.status})`);
+      const currentSpec = await reviewJobSpec(await specResponse.text(), deal.offer);
+      if (!currentSpec || currentSpec.hash !== deal.jobSnapshot?.hash) throw new Error("Job note changed after selection; accept blocked");
+      if (Date.now() >= deal.offer.expiresMs) throw new Error("Offer expired before acceptance; discard the local reservation");
+      const line = encodeFrame(deal.accept); const nonce = Date.now(); const signature = await sign(identity, OFFER_ROOM, nonce, line);
+      deal.state = "accept-pending"; deal.reservationSeq = reserved.seq;
+      localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
+      window.open(signedUrl(OFFER_ROOM, identity, signature, nonce, line), "_blank", "noopener,noreferrer");
+      $("#payee-status").textContent = `DEAL ROOM RESERVED · seq #${reserved.seq}\nACCEPT SUBMISSION OPENED — confirm Technocore says ok, then press CHECK ACTIVE DEAL again.`;
+      notice("Room is confirmed; the signed offer acceptance is now open for your confirmation");
+      return;
+    }
+    const accepted = await verifyAcceptRecord(await readOfferHistory(), deal.offer, deal.accept);
     if (!accepted) { $("#payee-status").textContent = "Accept is not yet confirmed in tclk-offers."; return; }
     const roomResponse = await fetch(`https://technocore.chat/r/${deal.room}?limit=200&format=json&n=${Date.now()}`);
     if (!roomResponse.ok) throw new Error(`Deal room read failed (${roomResponse.status})`);
@@ -740,12 +761,10 @@ $("#check-payee-deal").addEventListener("click", async () => {
 
 $("#discard-payee-deal").addEventListener("click", async () => {
   const deal = readPayeeDeal();
-  if (!deal || deal.state !== "accept-pending") return;
+  if (!deal || !["room-reservation-pending", "accept-pending"].includes(deal.state)) return;
   $("#discard-payee-deal").disabled = true;
   try {
-    const response = await fetch(`https://technocore.chat/r/${OFFER_ROOM}?limit=200&format=json&n=${Date.now()}`);
-    if (!response.ok) throw new Error(`Offer board read failed (${response.status})`);
-    const accepted = await verifyAcceptRecord(await response.json(), deal.offer, deal.accept);
+    const accepted = await verifyAcceptRecord(await readOfferHistory(), deal.offer, deal.accept);
     if (accepted) {
       deal.state = "accepted"; deal.acceptSeq = accepted.seq;
       localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
@@ -761,7 +780,7 @@ $("#discard-payee-deal").addEventListener("click", async () => {
     $("#payee-status").textContent = `Discard blocked: ${error.message}\nThe local encrypted secret was preserved.`;
   } finally {
     const current = readPayeeDeal();
-    $("#discard-payee-deal").disabled = !current || current.state !== "accept-pending";
+    $("#discard-payee-deal").disabled = !current || !["room-reservation-pending", "accept-pending"].includes(current.state);
   }
 });
 
@@ -820,7 +839,13 @@ renderPayerDeal();
 renderTrackRecord();
 if (readIdentity()) void syncTrackRecord({ announce: false });
 if (readPayeeDeal()) {
+  const payeeDeal = readPayeeDeal();
   $("#check-payee-deal").disabled = false;
-  $("#discard-payee-deal").disabled = readPayeeDeal().state !== "accept-pending";
-  $("#payee-status").textContent = `${readPayeeDeal().state === "accept-pending" ? "ACCEPT PREPARED LOCALLY — NOT YET VERIFIED ON TECHNOCORE" : "ACTIVE VERIFIED DEAL"}\nContract: ${readPayeeDeal().accept.contract}\nCheck the deal state to continue.`;
+  $("#discard-payee-deal").disabled = !["room-reservation-pending", "accept-pending"].includes(payeeDeal.state);
+  const payeeLabel = payeeDeal.state === "room-reservation-pending"
+    ? "DEAL ROOM RESERVATION PENDING — JOB NOT ACCEPTED"
+    : payeeDeal.state === "accept-pending"
+      ? "ACCEPT PREPARED LOCALLY — NOT YET VERIFIED ON TECHNOCORE"
+      : "ACTIVE VERIFIED DEAL";
+  $("#payee-status").textContent = `${payeeLabel}\nContract: ${payeeDeal.accept.contract}\nCheck the deal state to continue.`;
 }
