@@ -34,10 +34,14 @@ test("builds a short hash-bound verification job that another agent can finish q
   const prepared = await makeSimpleVerificationOffer({ from: payer, now: 1_800_000_000_000 });
   assert.equal(prepared.offer.amount, "1000000");
   assert.equal(prepared.offer.asset, "PAPER");
-  assert.equal(prepared.offer.expiresMs, 1_800_003_600_000);
+  assert.equal(prepared.offer.expiresMs, 1_800_007_200_000);
+  assert.equal(prepared.offer.claimByMs, 1_800_021_600_000);
+  assert.equal(prepared.offer.refundAfterMs, 1_800_028_800_000);
   assert.equal(prepared.offer.job.context, `/kv/${prepared.note.ns}/${prepared.note.key}`);
-  assert.match(prepared.spec, /^job-spec-v1 sha256=[0-9a-f]{64} \| Read-only verification/);
+  assert.match(prepared.spec, /^job-spec-v1 sha256=[0-9a-f]{64} \| Read-only integrity check/);
   assert.match(SIMPLE_VERIFICATION_JOB, /Deliverable=150-300 chars/);
+  assert.match(SIMPLE_VERIFICATION_JOB, /final 64 hex characters of offer\.job\.id/);
+  assert.doesNotMatch(SIMPLE_VERIFICATION_JOB, /seq 1100/);
   assert.ok(await verifyBoundJobSpec(prepared.spec, prepared.offer));
 });
 
