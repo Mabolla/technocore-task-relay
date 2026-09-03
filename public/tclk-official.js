@@ -3390,7 +3390,6 @@ async function summarizeDealActivity(raw, offer, accept, now = Date.now()) {
   return { status: folded.state.status, room: folded.room, seqs };
 }
 async function listSafePaperOffers(raw, myDid, now = Date.now()) {
-  const minAcceptLeadMs = 5 * 60 * 6e4;
   const minWorkAfterAcceptMs = 2 * 60 * 6e4;
   const decoded = records(raw).map((record) => ({ record, frame: tryDecodeFrame(record.text || "") }));
   const accepts = [];
@@ -3403,7 +3402,7 @@ async function listSafePaperOffers(raw, myDid, now = Date.now()) {
   for (const { record, frame } of decoded) {
     if (frame?.type !== "offer" || frame.from === myDid || frame.role !== "payer") continue;
     if (frame.asset !== "PAPER" || frame.lock !== "hash" || !frame.rails.includes("paper")) continue;
-    if (!frame.job?.id || !frame.job.context || frame.expiresMs < now + minAcceptLeadMs || frame.claimByMs < frame.expiresMs + minWorkAfterAcceptMs) continue;
+    if (!frame.job?.id || !frame.job.context || frame.expiresMs <= now || frame.claimByMs < frame.expiresMs + minWorkAfterAcceptMs) continue;
     const safeContext = frame.job.context.startsWith("https://technocore.chat/") || /^\/kv\/[a-z0-9][a-z0-9_-]{0,47}\/[a-z0-9][a-z0-9_-]{0,47}$/.test(frame.job.context);
     if (!safeContext) continue;
     if (record.from !== frame.from || !await validTransportSignature(record, OFFER_ROOM)) continue;
