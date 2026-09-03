@@ -1346,7 +1346,11 @@ function freshContextUrl(context) {
   return url.toString();
 }
 async function readOfferHistory() {
-  const response = await fetch(`https://technocore.chat/r/${OFFER_ROOM}/export?n=${Date.now()}`, { headers: { accept: "application/x-ndjson, application/json" } });
+  const response = await fetch(`https://technocore.chat/r/${OFFER_ROOM}/export?n=${Date.now()}`, {
+    headers: { accept: "application/x-ndjson, application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(20_000),
+  });
   if (!response.ok) throw new Error(`Technocore offer history read failed (${response.status})`);
   return response.text();
 }
@@ -1404,7 +1408,10 @@ function renderPayeeOffers(items) {
 async function verifyPaperOffers(offers) {
   const checked = await Promise.all(offers.map(async (candidate) => {
     try {
-      const specResponse = await fetch(freshContextUrl(candidate.offer.job.context), { cache: "no-store" });
+      const specResponse = await fetch(freshContextUrl(candidate.offer.job.context), {
+        cache: "no-store",
+        signal: AbortSignal.timeout(6_000),
+      });
       if (!specResponse.ok) return null;
       const spec = await reviewJobSpec(await specResponse.text(), candidate.offer);
       return spec ? { ...candidate, spec } : null;
@@ -1426,7 +1433,14 @@ $("#scan-offers").addEventListener("click", async () => {
       verified = await verifyPaperOffers(await listSafePaperOffers(await readOfferHistory(), identity.did));
     }
     renderPayeeOffers(verified); notice(`${verified.length} signed, unexpired actionable PAPER job${verified.length === 1 ? "" : "s"} found`);
-  } catch (error) { $("#payee-status").textContent = `Scan failed: ${error.message}`; }
+  } catch (error) {
+    const message = error?.name === "TimeoutError"
+      ? "Scan timed out while reading Technocore. No job was accepted; try again."
+      : `Scan failed: ${error.message}`;
+    $("#payee-candidates").textContent = message;
+    $("#payee-status").textContent = message;
+    notice(message);
+  }
   finally { button.disabled = false; }
 });
 
