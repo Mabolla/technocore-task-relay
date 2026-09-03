@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord } from "./tclk-official.js?v=auto-hunter-1";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord } from "./tclk-official.js?v=delivery-gate-1";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -588,6 +588,38 @@ async function readJobForAutoSettle(deal) {
   return reviewJobSpec(await response.text(), deal.offer);
 }
 
+function deliveryNeedsHumanReview(evaluation) {
+  return !evaluation?.ok && /no supported deterministic validator|not machine-verifiable/i.test(String(evaluation?.reason || ""));
+}
+
+function claimedDeliveryApproved(deal) {
+  if (deal?.deliveryEvaluation?.ok) return true;
+  return Boolean(deal?.deliveryReviewAllowed && deal.deliverySeq != null && String(deal.manualDeliveryApprovedSeq) === String(deal.deliverySeq));
+}
+
+async function inspectSignedPayerDelivery(deal, roomPayload, folded) {
+  const deliveries = await listSignedDeliveries(roomPayload, deal.accept);
+  const revealSeq = folded.applied.find((entry) => entry.frame.type === "reveal")?.seq;
+  const delivery = deliveries.filter((entry) => revealSeq == null || entry.seq == null || Number(entry.seq) < Number(revealSeq)).at(-1);
+  const previousSeq = deal.deliverySeq;
+  delete deal.deliverySeq;
+  delete deal.deliveryPreview;
+  delete deal.deliveryEvaluation;
+  delete deal.deliveryReviewAllowed;
+  if (!delivery) {
+    delete deal.manualDeliveryApprovedSeq;
+    return null;
+  }
+  const job = await readJobForAutoSettle(deal);
+  const evaluation = job ? evaluateObjectiveDelivery(job.text, delivery.text, deal.offer) : { ok: false, reason: "Job specification is not machine-verifiable" };
+  deal.deliverySeq = delivery.seq;
+  deal.deliveryPreview = delivery.text.slice(0, 1000);
+  deal.deliveryEvaluation = evaluation;
+  deal.deliveryReviewAllowed = deliveryNeedsHumanReview(evaluation);
+  if (String(previousSeq) !== String(delivery.seq)) delete deal.manualDeliveryApprovedSeq;
+  return { delivery, evaluation };
+}
+
 async function publishVerifiedPayerReceipt(deal, roomPayload, outcome) {
   const identity = readIdentity();
   if (!identity || identity.did !== deal.offer.from) throw new Error("Local DID does not match the payer");
@@ -734,17 +766,36 @@ function renderPayerDeal() {
   const lockSubmissionPending = deal?.state === "lock-submitted" || deal?.state === "lock-submission-opened";
   $("#open-payer-room").disabled = !deal;
   $("#check-payer-deal").disabled = !deal;
-  const terminal = (deal?.state === "claimed" && deal?.railState === "claimed") || (deal?.state === "refunded" && deal?.railState === "refunded");
+  const claimedTerminal = deal?.state === "claimed" && deal?.railState === "claimed";
+  const refundedTerminal = deal?.state === "refunded" && deal?.railState === "refunded";
+  const terminal = refundedTerminal || (claimedTerminal && claimedDeliveryApproved(deal));
   $("#refund-payer-deal").disabled = !(deal?.state === "locked" && deal?.railState === "locked" && Date.now() >= deal.offer.refundAfterMs);
   $("#publish-payer-receipt").disabled = !terminal;
+  const deliveryStatus = $("#payer-delivery-status");
+  const approveDelivery = $("#approve-payer-delivery");
+  approveDelivery.checked = Boolean(deal?.deliverySeq != null && String(deal.manualDeliveryApprovedSeq) === String(deal.deliverySeq));
+  approveDelivery.disabled = !(claimedTerminal && deal?.deliveryReviewAllowed);
+  deliveryStatus.textContent = !deal
+    ? "No signed delivery checked."
+    : deal.deliverySeq == null
+      ? "BLOCKED · No signed non-tclk result from the accepted payee was verified before reveal."
+      : `${deal.deliveryEvaluation?.ok ? "PASSED" : deal.deliveryReviewAllowed ? "HUMAN REVIEW REQUIRED" : "FAILED"} · SIGNED DELIVERY #${deal.deliverySeq}\n${deal.deliveryEvaluation?.reason || "Not evaluated"}\n\n${deal.deliveryPreview || ""}`;
   if (!deal) {
     $("#payer-deal-status").textContent = "No active payer deal saved in this browser.";
     return;
   }
   const state = lockSubmissionPending ? "lock submission opened — NOT VERIFIED" : (deal.state || "accepted / lock prepared");
   const rail = deal.railState || "check required";
-  const next = (state === "claimed" && rail === "claimed") || (state === "refunded" && rail === "refunded")
-    ? "NEXT: Sign the terminal receipt to archive the outcome."
+  const next = state === "refunded" && rail === "refunded"
+    ? "NEXT: Sign the refunded terminal receipt to archive the outcome."
+    : state === "claimed" && rail === "claimed" && deal.deliverySeq == null
+      ? "BLOCKED: Reveal/claim exists, but no signed job delivery was verified before it. Receipt stays disabled."
+    : state === "claimed" && rail === "claimed" && deal.deliveryReviewAllowed && !claimedDeliveryApproved(deal)
+      ? "NEXT: Review the signed delivery above and approve it manually only if the custom job is truly satisfied."
+    : state === "claimed" && rail === "claimed" && !claimedDeliveryApproved(deal)
+      ? `BLOCKED: Signed delivery failed validation — ${deal.deliveryEvaluation?.reason || "unknown reason"}.`
+    : state === "claimed" && rail === "claimed"
+      ? "NEXT: Verified delivery passed; sign the terminal receipt to archive the outcome."
     : lockSubmissionPending
       ? "NEXT: The signed lock is not confirmed on Technocore. If its tab returned 400, wait for a slot and press VERIFY & PUBLISH SIGNED LOCK again. After Technocore says ok, press VERIFY LOCK / CHECK RESULT."
     : state === "accepted" || state === "accepted / lock prepared"
@@ -757,6 +808,25 @@ function renderPayerDeal() {
   const seqs = deal.offerSeq || deal.acceptSeq ? `\nVerified chain: OFFER #${deal.offerSeq ?? "?"} → ACCEPT #${deal.acceptSeq ?? "?"}` : "";
   $("#payer-deal-status").textContent = `Contract: ${deal.accept.contract}\nCounterparty: ${deal.accept.from}\nDeal room: /r/${deal.lock.room}${seqs}\nTranscript state: ${state}\nPaperRail state: ${rail}\n${next}`;
 }
+
+$("#approve-payer-delivery").addEventListener("change", (event) => {
+  const deal = readPayerDeal();
+  if (!deal?.deliveryReviewAllowed || deal.deliverySeq == null) { event.target.checked = false; return; }
+  if (!event.target.checked) {
+    delete deal.manualDeliveryApprovedSeq;
+    saveActivePayerDeal(deal);
+    renderPayerDeal();
+    return;
+  }
+  if (!window.confirm(`Approve this exact signed delivery manually?\n\nSeq #${deal.deliverySeq}\n${deal.deliveryPreview}\n\nOnly continue if it satisfies every custom job requirement.`)) {
+    event.target.checked = false;
+    return;
+  }
+  deal.manualDeliveryApprovedSeq = deal.deliverySeq;
+  saveActivePayerDeal(deal);
+  renderPayerDeal();
+  notice(`Signed delivery #${deal.deliverySeq} manually approved for this custom job`);
+});
 const agentNameOf = (identity) => identity?.agentName || (identity?.did === CREATOR_DID ? "Mabolla Agent" : "Task Relay Agent");
 const initialsOf = (name) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "TR";
 
@@ -1139,15 +1209,19 @@ $("#check-payer-deal").addEventListener("click", async () => {
   try {
     const roomResponse = await fetch(`https://technocore.chat/r/${deal.lock.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" } });
     if (!roomResponse.ok) throw new Error(`Deal room read failed (${roomResponse.status})`);
-    const folded = await foldPayeeDeal(await roomResponse.json(), deal.offer, deal.accept);
+    const roomPayload = await roomResponse.json();
+    const folded = await foldPayeeDeal(roomPayload, deal.offer, deal.accept);
     const expected = expectedPaperLock(deal.offer, deal.accept);
     let railState = "absent";
     const noteResponse = await fetch(`https://technocore.chat/kv/${expected.note.ns}/${expected.note.key}?n=${Date.now()}`);
     if (noteResponse.ok) railState = classifyPaperRecord(stripNoteBanner(await noteResponse.text()), deal.offer, deal.accept);
     deal.state = folded.state.status; deal.railState = railState; deal.checkedAt = new Date().toISOString();
+    await inspectSignedPayerDelivery(deal, roomPayload, folded);
     saveActivePayerDeal(deal);
     renderPayerDeal();
-    notice(folded.state.status === "claimed" ? "Valid payee reveal found" : "No valid payee reveal yet");
+    notice(folded.state.status === "claimed"
+      ? claimedDeliveryApproved(deal) ? "Valid reveal and approved signed delivery found" : "Reveal found, but terminal receipt is blocked by the signed-delivery gate"
+      : "No valid payee reveal yet");
     void syncTrackRecord({ announce: false });
   } catch (error) {
     const pending = deal.state === "lock-submitted" || deal.state === "lock-submission-opened";
@@ -1157,9 +1231,28 @@ $("#check-payer-deal").addEventListener("click", async () => {
 
 $("#publish-payer-receipt").addEventListener("click", async () => {
   const identity = readIdentity(); const deal = readPayerDeal();
-  const terminal = (deal?.state === "claimed" && deal?.railState === "claimed") || (deal?.state === "refunded" && deal?.railState === "refunded");
+  const terminal = (deal?.state === "claimed" && deal?.railState === "claimed" && claimedDeliveryApproved(deal)) || (deal?.state === "refunded" && deal?.railState === "refunded");
   if (!identity || !terminal) return;
   const receipt = makePayeeReceipt(deal.accept, identity.did, deal.state);
+  const roomResponse = await fetch(`https://technocore.chat/r/${receipt.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+  if (!roomResponse.ok) { notice(`Receipt check blocked: deal room read failed (${roomResponse.status})`); return; }
+  const roomPayload = await roomResponse.json();
+  const existing = await verifyExactFrameRecord(roomPayload, receipt.frame, receipt.room);
+  if (existing) {
+    deal.receiptSeq = existing.seq;
+    deal.receiptVerifiedAt = new Date().toISOString();
+    saveActivePayerDeal(deal);
+    renderPayerDeal();
+    notice(`Terminal receipt already exists at seq #${existing.seq ?? "?"}; no duplicate was published`);
+    return;
+  }
+  if (deal.state === "claimed") {
+    const folded = await foldPayeeDeal(roomPayload, deal.offer, deal.accept);
+    await inspectSignedPayerDelivery(deal, roomPayload, folded);
+    saveActivePayerDeal(deal);
+    renderPayerDeal();
+    if (!claimedDeliveryApproved(deal)) { notice("Receipt blocked: no approved signed delivery exists before reveal"); return; }
+  }
   if (!window.confirm(`Archive this terminal payer deal with a signed ${deal.state} receipt?\n\n${receipt.line}`)) return;
   const nonce = Date.now(); const signature = await sign(identity, receipt.room, nonce, receipt.line);
   window.open(signedUrl(receipt.room, identity, signature, nonce, receipt.line), "_blank", "noopener,noreferrer");
@@ -1420,8 +1513,14 @@ function jobSummary(entry) {
   return (match?.[1] || `${entry.offer.job.proto} · ${entry.offer.job.id}`).slice(0, 180);
 }
 
+function successfulTrackEntry(entry) {
+  return entry.status === "claimed" && Boolean(entry.seqs?.receipt) && entry.deliveryVerified === true;
+}
+
 function statusLabel(entry) {
-  if (entry.status === "claimed" && entry.seqs?.receipt) return "SUCCESSFUL";
+  if (successfulTrackEntry(entry)) return "SUCCESSFUL · DELIVERY VERIFIED";
+  if (entry.status === "claimed" && entry.seqs?.receipt && entry.deliverySeq == null) return "CLAIMED · RECEIPT PRESENT · NO DELIVERY";
+  if (entry.status === "claimed" && entry.seqs?.receipt) return "CLAIMED · DELIVERY UNVERIFIED";
   if (entry.status === "claimed") return "CLAIMED · RECEIPT PENDING";
   if (entry.status === "refunded" && entry.seqs?.receipt) return "REFUNDED · RECEIPT SIGNED";
   return String(entry.status || "unknown").toUpperCase();
@@ -1455,7 +1554,7 @@ function renderTrackRecord() {
   const entries = readTrackRecords();
   $("#track-given").textContent = entries.filter((entry) => entry.role === "payer").length;
   $("#track-attempted").textContent = entries.filter((entry) => entry.role === "payee").length;
-  $("#track-successful").textContent = entries.filter((entry) => entry.status === "claimed" && entry.seqs?.receipt).length;
+  $("#track-successful").textContent = entries.filter(successfulTrackEntry).length;
   $("#track-active").textContent = entries.filter((entry) => ["offered", "accepted", "locked"].includes(entry.status)).length;
   const body = $("#track-record-rows");
   if (!entries.length) {
@@ -1505,21 +1604,37 @@ async function syncTrackRecord({ announce = true } = {}) {
   try {
     const activity = await listMyPaperActivity(await readOfferHistory(), identity.did);
     for (const entry of activity) {
+      let roomPayload = null;
       if (entry.accept && entry.room) {
         const roomResponse = await fetch(`https://technocore.chat/r/${entry.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" } });
         if (roomResponse.ok) {
-          const deal = await summarizeDealActivity(await roomResponse.json(), entry.offer, entry.accept);
+          roomPayload = await roomResponse.json();
+          const deal = await summarizeDealActivity(roomPayload, entry.offer, entry.accept);
           entry.status = deal.status; entry.seqs = { ...entry.seqs, ...deal.seqs };
+          const deliveries = await listSignedDeliveries(roomPayload, entry.accept);
+          const delivery = deliveries.filter((item) => deal.seqs.reveal == null || item.seq == null || Number(item.seq) < Number(deal.seqs.reveal)).at(-1);
+          entry.deliverySeq = delivery?.seq ?? null;
+          entry.deliveryText = delivery?.text ?? null;
         }
       } else if (entry.offer.expiresMs <= Date.now()) entry.status = "expired";
       const jobUrl = contextUrl(entry.offer.job.context);
       if (jobUrl.startsWith("https://technocore.chat/")) {
         const specResponse = await fetch(`${jobUrl}?n=${Date.now()}`);
         if (specResponse.ok) {
-          const spec = await verifyBoundJobSpec(await specResponse.text(), entry.offer);
-          if (spec) entry.jobText = spec.text;
+          const spec = await reviewJobSpec(await specResponse.text(), entry.offer);
+          if (spec) {
+            entry.jobText = spec.text;
+            if (entry.deliveryText) {
+              const evaluation = evaluateObjectiveDelivery(spec.text, entry.deliveryText, entry.offer);
+              const saved = readPayerDeals()[entry.contract];
+              const manuallyApproved = deliveryNeedsHumanReview(evaluation) && String(saved?.manualDeliveryApprovedSeq) === String(entry.deliverySeq);
+              entry.deliveryVerified = evaluation.ok || manuallyApproved;
+              entry.deliveryEvaluationReason = evaluation.reason;
+            }
+          }
         }
       }
+      if (!entry.deliveryText) entry.deliveryVerified = false;
     }
     mergeTrackRecords(activity);
     $("#track-sync-status").textContent = `Verified from Technocore · ${new Date().toLocaleString()}`;
