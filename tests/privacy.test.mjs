@@ -140,6 +140,8 @@ test("reserves the derived room before publishing a payee accept", () => {
   assert.match(source, /signedUrl\(OFFER_ROOM/);
   assert.match(source, /JOB NOT ACCEPTED YET/);
   assert.match(source, /\/export\?n=/);
+  assert.match(source, /AbortSignal\.timeout\(6_000\)/);
+  assert.match(source, /Scan timed out while reading Technocore/);
   assert.match(source, /Job note changed after selection; accept blocked/);
 });
 
@@ -175,6 +177,8 @@ test("hunts one new safe job and hands it to room-safe auto-accept", () => {
   assert.match(source, /VERIFY STALE DEAL & ARM AUTO-JOB HUNTER/);
   assert.match(source, /VERIFIED UNACCEPTED STALE CANDIDATE CLEARED/);
   assert.match(source, /Hunter not armed — the previous accept exists at seq/);
+  assert.match(source, /ARMING · READING CURRENT SIGNED OFFERS/);
+  assert.match(source, /AbortSignal\.timeout\(15_000\)/);
   assert.match(source, /STOPPED AFTER REFRESH · ARM AGAIN BECAUSE THE VAULT PASSWORD IS NEVER STORED/);
   assert.match(source, /It stops once one job is actually accepted/);
   assert.doesNotMatch(source, /localStorage\.setItem\(PAYEE_AUTO_HUNTER_KEY[^\n]*payeeAutoHunterVaultPassword/);
