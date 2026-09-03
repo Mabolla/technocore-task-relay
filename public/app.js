@@ -493,11 +493,14 @@ function savePayeeAutoHunter(state) {
 
 function renderPayeeAutoHunter() {
   const state = readPayeeAutoHunter();
+  const deal = readPayeeDeal();
+  const recoverable = Boolean(deal && ["auto-accept-expired", "auto-accept-unavailable"].includes(deal.state));
   const status = $("#payee-auto-hunter-status");
   const arm = $("#payee-auto-hunter");
   const stop = $("#payee-auto-hunter-stop");
   if (!status || !arm || !stop) return;
-  arm.disabled = state.armed || Boolean(readPayeeDeal());
+  arm.disabled = state.armed || Boolean(deal && !recoverable);
+  arm.textContent = recoverable ? "VERIFY STALE DEAL & ARM AUTO-JOB HUNTER" : "ARM AUTO-JOB HUNTER";
   stop.disabled = !state.armed;
   status.textContent = state.armed
     ? `ARMED · TAB MUST STAY OPEN\nMinimum finish time: ${state.minFinishMinutes}m\n${state.status || "Watching signed tclk-offers"}`
@@ -1425,7 +1428,34 @@ $("#scan-offers").addEventListener("click", async () => {
 $("#payee-auto-hunter").addEventListener("click", async () => {
   const identity = readIdentity();
   if (!identity) { notice("Restore the existing DID before arming the auto-job hunter"); return; }
-  if (readPayeeDeal()) { notice("Finish or discard the active/prepared payee deal before hunting another job"); return; }
+  const existing = readPayeeDeal();
+  if (existing) {
+    if (!["auto-accept-expired", "auto-accept-unavailable"].includes(existing.state)) {
+      notice("Finish or discard the active/prepared payee deal before hunting another job");
+      return;
+    }
+    try {
+      const accepted = await verifyAcceptRecord(await readOfferHistory(), existing.offer, existing.accept);
+      if (accepted) {
+        existing.state = "accepted";
+        existing.acceptSeq = accepted.seq;
+        existing.autoAcceptStatus = `ACCEPT VERIFIED · seq #${accepted.seq ?? "?"}`;
+        savePayeeDeal(existing);
+        $("#check-payee-deal").disabled = false;
+        $("#discard-payee-deal").disabled = true;
+        notice(`Hunter not armed — the previous accept exists at seq #${accepted.seq ?? "?"}`);
+        return;
+      }
+      stopPayeeAutoAccept("VERIFIED UNACCEPTED STALE CANDIDATE CLEARED", null);
+      localStorage.removeItem(PAYEE_DEAL_KEY);
+      resetPayeeUi();
+      renderPayeeAutoHunter();
+      notice("Previous candidate had no matching accept and was safely cleared");
+    } catch (error) {
+      notice(`Hunter not armed — stale candidate verification failed: ${error.message}`);
+      return;
+    }
+  }
   const minFinishMinutes = Number($("#payee-auto-hunter-minutes").value);
   if (!Number.isInteger(minFinishMinutes) || minFinishMinutes < 10 || minFinishMinutes > 1440) {
     notice("Minimum finish time must be 10-1440 whole minutes"); return;
