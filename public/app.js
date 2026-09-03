@@ -325,17 +325,56 @@ async function recheckAutoAcceptOffer(deal, identity) {
   return available.some((candidate) => candidate.offer.id === deal.offer.id);
 }
 
+async function resolveUnacceptedHunterMiss(deal, state, reason) {
+  const accepted = await verifyAcceptRecord(await readOfferHistory(), deal.offer, deal.accept);
+  if (accepted) {
+    deal.state = "accepted";
+    deal.acceptSeq = accepted.seq;
+    deal.autoAcceptStatus = `ACCEPT VERIFIED DURING RECOVERY · seq #${accepted.seq ?? "?"}`;
+    savePayeeDeal(deal);
+    stopPayeeAutoAccept(deal.autoAcceptStatus, deal);
+    payeeAutoHunterVaultPassword = null;
+    $("#check-payee-deal").disabled = false;
+    $("#discard-payee-deal").disabled = true;
+    $("#payee-status").textContent = `AUTO-ACCEPT VERIFIED · seq #${accepted.seq ?? "?"}\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.room}\nNEXT: Wait for the payer's signed lock, then press CHECK ACTIVE DEAL.`;
+    notifyPayeeAutoAccept("Technocore job accepted", `Offer #${deal.offerSeq ?? "?"} is verified. Wait for the payer lock.`);
+    return "accepted";
+  }
+
+  deal.state = state;
+  if (deal.selectedBy !== "auto-job-hunter" || !payeeAutoHunterVaultPassword) {
+    stopPayeeAutoAccept(reason, deal);
+    return "stopped";
+  }
+
+  const tail = await readOfferTail();
+  const cursor = Number(tail.last_seq || tail.messages?.at(-1)?.seq || 0);
+  const hunter = readPayeeAutoHunter();
+  stopPayeeAutoAccept(reason, deal);
+  localStorage.removeItem(PAYEE_DEAL_KEY);
+  resetPayeeUi();
+  savePayeeAutoHunter({
+    ...hunter,
+    armed: true,
+    cursor,
+    reason: "",
+    status: `${reason} · VERIFIED NO ACCEPT · WATCHING NEXT OFFERS`,
+    resumedAt: new Date().toISOString(),
+  });
+  notifyPayeeAutoAccept("Technocore job hunter resumed", `Offer #${deal.offerSeq ?? "?"} ended without an accept; watching the next eligible job.`);
+  setTimeout(() => { payeeAutoHunterRunning = false; void runPayeeAutoHunter(); }, 0);
+  return "resumed";
+}
+
 async function tryAutoAcceptPayeeDeal(deal, eventSeq) {
   const identity = readIdentity();
   if (!identity || identity.did !== deal.accept.from) throw new Error("Local DID does not match the prepared payee accept");
   if (Date.now() >= deal.offer.expiresMs || Date.now() >= deal.offer.claimByMs) {
-    deal.state = "auto-accept-expired";
-    stopPayeeAutoAccept("OFFER EXPIRED BEFORE A ROOM SLOT", deal);
+    await resolveUnacceptedHunterMiss(deal, "auto-accept-expired", "OFFER EXPIRED BEFORE A ROOM SLOT");
     return false;
   }
   if (deal.state !== "accept-pending" && !await recheckAutoAcceptOffer(deal, identity)) {
-    deal.state = "auto-accept-unavailable";
-    stopPayeeAutoAccept("OFFER IS NO LONGER AVAILABLE", deal);
+    await resolveUnacceptedHunterMiss(deal, "auto-accept-unavailable", "OFFER IS NO LONGER AVAILABLE");
     return false;
   }
 
@@ -366,8 +405,7 @@ async function tryAutoAcceptPayeeDeal(deal, eventSeq) {
 
   deal.reservationSeq = reserved.seq;
   if (deal.state !== "accept-pending" && !await recheckAutoAcceptOffer(deal, identity)) {
-    deal.state = "auto-accept-unavailable";
-    stopPayeeAutoAccept("ROOM RESERVED, BUT OFFER WAS TAKEN OR EXPIRED BEFORE ACCEPT", deal);
+    await resolveUnacceptedHunterMiss(deal, "auto-accept-unavailable", "ROOM RESERVED, BUT OFFER WAS TAKEN OR EXPIRED BEFORE ACCEPT");
     return false;
   }
   deal.state = "accept-pending";
@@ -399,6 +437,7 @@ async function tryAutoAcceptPayeeDeal(deal, eventSeq) {
   deal.autoAcceptStatus = `ACCEPT VERIFIED · seq #${accepted.seq ?? "?"}`;
   savePayeeDeal(deal);
   stopPayeeAutoAccept(deal.autoAcceptStatus, deal);
+  payeeAutoHunterVaultPassword = null;
   $("#check-payee-deal").disabled = false;
   $("#discard-payee-deal").disabled = true;
   $("#payee-status").textContent = `AUTO-ACCEPT VERIFIED · seq #${accepted.seq ?? "?"}\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.room}\nNEXT: Wait for the payer's signed lock, then press CHECK ACTIVE DEAL.`;
@@ -417,8 +456,7 @@ async function runPayeeAutoAccept() {
         break;
       }
       if (Date.now() >= deal.offer.expiresMs || Date.now() >= deal.offer.claimByMs) {
-        deal.state = "auto-accept-expired";
-        stopPayeeAutoAccept("OFFER EXPIRED BEFORE A ROOM SLOT", deal);
+        await resolveUnacceptedHunterMiss(deal, "auto-accept-expired", "OFFER EXPIRED BEFORE A ROOM SLOT");
         break;
       }
       const state = readPayeeAutoAccept();
@@ -473,6 +511,12 @@ function stopPayeeAutoHunter(reason) {
   payeeAutoHunterRunning = false;
 }
 
+function pausePayeeAutoHunter(reason) {
+  const state = readPayeeAutoHunter();
+  savePayeeAutoHunter({ ...state, armed: false, reason, stoppedAt: new Date().toISOString() });
+  payeeAutoHunterRunning = false;
+}
+
 async function tryAutoHuntFromPayload(payload) {
   const state = readPayeeAutoHunter();
   const identity = readIdentity();
@@ -511,7 +555,7 @@ async function tryAutoHuntFromPayload(payload) {
     minimumFinishMs,
   };
   savePayeeDeal(deal);
-  stopPayeeAutoHunter(`MATCHED OFFER #${candidate.seq} · HANDING OFF TO ROOM-SAFE AUTO-ACCEPT`);
+  pausePayeeAutoHunter(`MATCHED OFFER #${candidate.seq} · HANDING OFF TO ROOM-SAFE AUTO-ACCEPT`);
   notifyPayeeAutoAccept("Safe Technocore job matched", `Offer #${candidate.seq} is selected; reserving its derived room before accept.`);
   await startPayeeAutoAccept(deal, state.notificationPermission);
   return true;
@@ -1386,7 +1430,7 @@ $("#payee-auto-hunter").addEventListener("click", async () => {
   if (!Number.isInteger(minFinishMinutes) || minFinishMinutes < 10 || minFinishMinutes > 1440) {
     notice("Minimum finish time must be 10-1440 whole minutes"); return;
   }
-  if (!window.confirm(`Arm the automatic PAPER job hunter?\n\nIt will select the newest signed job that passes the read-only safety checks with at least ${minFinishMinutes} minutes left, create an encrypted local hash-lock secret, reserve and verify the derived room, and only then publish accept. It stops after selecting one job. A capacity 400 publishes no accept and hands the job to the slot watcher. Keep this tab open.`)) return;
+  if (!window.confirm(`Arm the automatic PAPER job hunter?\n\nIt will select the newest signed job that passes the read-only safety checks with at least ${minFinishMinutes} minutes left, create an encrypted local hash-lock secret, reserve and verify the derived room, and only then publish accept. If an unaccepted candidate expires before a slot, it verifies that no accept exists and keeps hunting. It stops after one job is actually accepted. A capacity 400 publishes no accept and hands the job to the slot watcher. Keep this tab open.`)) return;
   const vaultPassword = window.prompt("Create one deal-vault password for the automatically selected job (minimum 12 characters). Save it now; it stays only in this open tab and is required later to reveal.");
   if (!vaultPassword || vaultPassword.length < 12) { notice("Auto-job hunter cancelled — vault password must be at least 12 characters"); return; }
   let notificationPermission = "unsupported";
@@ -1783,6 +1827,7 @@ $("#discard-payee-deal").addEventListener("click", async () => {
     }
     if (!window.confirm("No matching accept was found on Technocore. Stop auto-accept and discard this local pending deal and its encrypted secret? This cannot be undone.")) return;
     stopPayeeAutoAccept("STOPPED AND DISCARDED", null);
+    if (deal.selectedBy === "auto-job-hunter") payeeAutoHunterVaultPassword = null;
     localStorage.removeItem(PAYEE_DEAL_KEY);
     resetPayeeUi();
     notice("Unconfirmed local payee deal discarded");
@@ -1798,6 +1843,7 @@ $("#payee-auto-accept-stop").addEventListener("click", () => {
   const deal = readPayeeDeal();
   if (!readPayeeAutoAccept().armed || !deal) return;
   stopPayeeAutoAccept("STOPPED BY USER · NO ACCEPT PUBLISHED UNLESS SHOWN AS VERIFIED", deal);
+  if (deal.selectedBy === "auto-job-hunter") payeeAutoHunterVaultPassword = null;
   $("#discard-payee-deal").disabled = false;
   notice("Payee auto-accept stopped; the encrypted pending deal was preserved");
 });
@@ -1879,6 +1925,10 @@ if (readPayeeDeal()) {
   $("#discard-payee-deal").disabled = !["auto-accept-armed", "auto-accept-expired", "auto-accept-unavailable", "room-reservation-pending", "accept-pending"].includes(payeeDeal.state);
   const payeeLabel = payeeDeal.state === "auto-accept-armed"
     ? "AUTO-ACCEPT ARMED — JOB NOT ACCEPTED"
+    : payeeDeal.state === "auto-accept-expired"
+      ? "EXPIRED BEFORE ROOM SLOT — NO ACCEPT VERIFIED"
+    : payeeDeal.state === "auto-accept-unavailable"
+      ? "OFFER UNAVAILABLE — NO ACCEPT VERIFIED"
     : payeeDeal.state === "room-reservation-pending"
     ? "DEAL ROOM RESERVATION PENDING — JOB NOT ACCEPTED"
     : payeeDeal.state === "accept-pending"
