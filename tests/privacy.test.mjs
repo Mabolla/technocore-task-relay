@@ -264,6 +264,15 @@ test("manual payer settlement requires a signed delivery and blocks duplicate re
   assert.match(source, /\$\("#approve-payer-delivery"\)\?\.addEventListener/);
 });
 
+test("payee publishes and verifies a signed delivery before revealing", () => {
+  assert.match(source, /SIGN &amp; PUBLISH DELIVERY/);
+  assert.match(source, /publish-payee-delivery/);
+  assert.match(source, /Signed delivery:.*NOT PUBLISHED/);
+  assert.match(source, /Exact signed delivery already exists at seq/);
+  assert.match(source, /Reveal blocked: publish and verify the signed job delivery first/);
+  assert.match(source, /listSignedDeliveries\(await roomResponse\.json\(\), deal\.accept\)/);
+});
+
 test("refunds an expired locked payer deal before issuing its terminal receipt", () => {
   assert.match(source, /REFUND EXPIRED DEAL/);
   assert.match(source, /Date\.now\(\) >= deal\.offer\.refundAfterMs/);
