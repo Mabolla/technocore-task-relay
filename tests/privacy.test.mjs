@@ -148,45 +148,48 @@ test("reserves the derived room before publishing a payee accept", () => {
   assert.match(source, /Job note changed after selection; accept blocked/);
 });
 
-test("auto-accepts only an explicitly armed offer after a verified room reservation", () => {
+test("auto-accepts an explicitly armed offer first, then retries its room", () => {
   assert.match(source, /ARM AUTO-ACCEPT/);
   assert.match(source, /PAYEE AUTO-ACCEPT · LOCAL KEY ONLY/);
   assert.match(source, /PAYEE_AUTO_ACCEPT_KEY/);
-  assert.match(source, /message\.from === "server"/);
-  assert.match(source, /\^created\\s\+\\S\+/);
-  assert.match(source, /SLOT LOST AT EVENT/);
-  assert.match(source, /wait=2&format=json/);
-  assert.match(source, /created\?\.seq \?\? "PROACTIVE"/);
-  assert.match(source, /Date\.now\(\) - lastOfferCheck >= 5_000/);
+  assert.match(source, /CLAIMING OFFER/);
+  assert.match(source, /ACCEPT VERIFIED.*CLAIM SECURED.*CREATING DEAL ROOM/);
+  assert.match(source, /ROOM FULL · RETRY/);
+  assert.match(source, /tryAutoAcceptPayeeDeal\(deal, "DIRECT"\)/);
+  assert.match(source, /setTimeout\(resolve, 100\)/);
+  assert.match(source, /verifyAcceptRecord\(await readOfferTail\(\), deal\.offer, deal\.accept\)/);
   assert.match(source, /inspectPayeeReservation/);
   assert.match(source, /recheckAutoAcceptOffer/);
   assert.match(source, /signedUrl\(deal\.room/);
   assert.match(source, /signedUrl\(OFFER_ROOM/);
-  assert.match(source, /A capacity 400 publishes no accept/);
+  assert.match(source, /room-capacity 400 keeps retrying the derived room/);
   assert.match(source, /Resume this exact prepared deal with auto-accept/);
   assert.match(source, /The encrypted pending deal was preserved/);
 });
 
-test("hunts one new safe job and hands it to room-safe auto-accept", () => {
+test("hunts one new safe job and hands it to accept-first auto-accept", () => {
   assert.match(source, /ARM AUTO-JOB HUNTER/);
   assert.match(source, /PAYEE AUTO-JOB HUNTER · LOCAL KEY ONLY/);
   assert.match(source, /PAYEE_AUTO_HUNTER_KEY/);
   assert.match(source, /Minimum finish time when matched/);
   assert.match(source, /listSafePaperOffers\(payload, identity\.did, Date\.now\(\), minimumFinishMs\)/);
   assert.match(source, /selectedBy: "auto-job-hunter"/);
+  assert.match(source, /verifyFirstPaperOffer/);
+  assert.match(source, /Promise\.any/);
+  assert.match(source, /AbortSignal\.timeout\(3_000\)/);
   assert.match(source, /startPayeeAutoAccept\(deal, state\.notificationPermission\)/);
   assert.match(source, /pausePayeeAutoHunter/);
   assert.match(source, /resolveUnacceptedHunterMiss/);
   assert.match(source, /VERIFIED NO ACCEPT · WATCHING NEXT OFFERS/);
   assert.match(source, /await verifyAcceptRecord\(await readOfferHistory\(\), deal\.offer, deal\.accept\)/);
-  assert.match(source, /EXPIRED BEFORE ROOM SLOT — NO ACCEPT VERIFIED/);
+  assert.match(source, /OFFER EXPIRED BEFORE ACCEPT/);
   assert.match(source, /VERIFY STALE DEAL & ARM AUTO-JOB HUNTER/);
   assert.match(source, /VERIFIED UNACCEPTED STALE CANDIDATE CLEARED/);
   assert.match(source, /Hunter not armed — the previous accept exists at seq/);
   assert.match(source, /ARMING · READING CURRENT SIGNED OFFERS/);
   assert.match(source, /AbortSignal\.timeout\(15_000\)/);
   assert.match(source, /STOPPED AFTER REFRESH · ARM AGAIN BECAUSE THE VAULT PASSWORD IS NEVER STORED/);
-  assert.match(source, /It stops once one job is actually accepted/);
+  assert.match(source, /publishing accept immediately/);
   assert.doesNotMatch(source, /localStorage\.setItem\(PAYEE_AUTO_HUNTER_KEY[^\n]*payeeAutoHunterVaultPassword/);
 });
 
