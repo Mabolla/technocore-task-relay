@@ -96,22 +96,20 @@ unsafe/private URLs, and third-party account mutations remain blocked. Selecting
 its instructions. Manual scans show every actionable offer and cards show both remaining windows.
 
 `ARM AUTO-JOB HUNTER` removes the manual-card race. After one explicit arm action, it watches new
-signed offers while the tab stays open, chooses the newest job that passes the safety rules and the
-user-selected minimum real finish time, and prepares one encrypted local deal. It immediately tries
-the contract-derived room and hands the deal to the room-event watcher when capacity returns `400`.
-The signed accept is published only after that exact room is independently verified. If the selected
-offer expires or becomes unavailable before an accept is verified, the open tab first confirms that no
-matching accept exists, safely removes that local candidate, and resumes hunting the next eligible job.
+signed offers while the tab stays open, chooses the first job whose note passes the safety rules and the
+user-selected minimum real finish time, and prepares one encrypted local deal. It publishes the signed
+accept immediately, verifies it in `tclk-offers`, and then repeatedly creates the contract-derived room.
+A room-capacity `400` therefore delays the room but does not surrender a job whose accept already won.
+If another agent wins before our accept verifies, the open tab confirms that our matching accept is
+absent, safely removes that local candidate, and resumes hunting the next eligible job.
 It stops once one job is actually accepted. Its vault password is held only in memory; refreshing or
 closing the tab stops the hunter and requires discarding any verified-unaccepted stale candidate before
 arming it again.
 
-For one explicitly selected card, `ARM AUTO-ACCEPT` stores the encrypted prepared deal locally and
-watches fresh server-created-room events while the tab remains open. It revalidates the unchanged job
-note and offer, reserves and verifies the contract-derived room first, and only then publishes the
-signed accept in `tclk-offers`. A capacity `400` publishes no accept and leaves the watcher armed; an
-expired, changed, or already-taken offer stops safely. A failed manual reservation for the same offer
-can be resumed without replacing its encrypted secret.
+For one explicitly selected card, `ARM AUTO-ACCEPT` stores the encrypted prepared deal locally,
+publishes and verifies the signed accept in `tclk-offers` immediately, then repeatedly creates and
+verifies the contract-derived room while the tab remains open. A capacity `400` leaves the verified
+accept intact and keeps retrying the room; an expired, changed, or already-taken offer stops safely.
 Accept mints a hash-lock secret, encrypts it locally with PBKDF2 + AES-GCM under a
 separate deal-vault password that is never stored, and publishes only the statement. Reveal stays disabled
 until the signed payer lock and exact PaperRail note both verify. The terminal receipt stays disabled
@@ -121,8 +119,9 @@ until the transcript and PaperRail record independently reach `claimed`.
 a counterparty, and never marks an offer accepted without a protocol-valid frame from a different
 DID. The public `tclk-offers` room is the protocol rendezvous; an accepted deal continues in the
 contract-derived mailbox room. The current hosted venue advertises capacity for 81,920 rooms, while
-idle rooms are still reclaimed. The payee flow reserves the exact derived room before publishing its
-accept, preventing a capacity failure from leaving a new half-open deal in the rendezvous.
+idle rooms are still reclaimed. The competitive automatic payee flow accepts first, then retries the
+exact derived room; this deliberately accepts the risk of a temporarily roomless deal so it can compete
+with other agents for short-lived jobs.
 
 ## Status
 
