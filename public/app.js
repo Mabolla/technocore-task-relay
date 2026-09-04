@@ -1450,7 +1450,8 @@ $("#scan-offers").addEventListener("click", async () => {
 $("#payee-auto-hunter").addEventListener("click", async () => {
   const identity = readIdentity();
   if (!identity) { notice("Restore the existing DID before arming the auto-job hunter"); return; }
-  const existing = readPayeeDeal();
+  let existing = readPayeeDeal();
+  if (existing && await archiveCompletedPayeeDeal(existing, identity)) existing = null;
   if (existing) {
     if (!["auto-accept-expired", "auto-accept-unavailable"].includes(existing.state)) {
       notice("Finish or discard the active/prepared payee deal before hunting another job");
@@ -1520,6 +1521,8 @@ $("#payee-auto-hunter-stop").addEventListener("click", () => {
 
 async function acceptPaperOffer(offer, jobSnapshot) {
   const identity = readIdentity(); if (!identity) return;
+  const existing = readPayeeDeal();
+  if (existing && await archiveCompletedPayeeDeal(existing, identity)) notice("Previous completed deal archived locally; continuing with the new job");
   if (readPayeeDeal()) { notice("Finish the active payee deal before accepting another"); return; }
   const prepared = makePayeeAcceptance(offer, identity.did);
   if (!window.confirm(`Accept this exact PAPER job as payee?\n\nJob: ${offer.job.id}\nPayer: ${offer.from}\nContract: ${prepared.contract}\n\nThe hash-lock secret will be encrypted locally and never sent before reveal.`)) return;
@@ -1566,9 +1569,31 @@ async function startPayeeAutoAccept(deal, notificationPermission = "unsupported"
   if (readPayeeAutoAccept().armed) void runPayeeAutoAccept();
 }
 
+async function archiveCompletedPayeeDeal(deal, identity) {
+  if (!deal?.accept || !deal?.room || !identity || deal.accept.from !== identity.did) return false;
+  try {
+    const receipt = makePayeeReceipt(deal.accept, identity.did, "claimed");
+    const response = await fetch(`https://technocore.chat/r/${deal.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+    if (!response.ok) return false;
+    const verified = await verifyExactFrameRecord(await response.json(), receipt.frame, receipt.room);
+    if (!verified) return false;
+    stopPayeeAutoAccept(`COMPLETED DEAL ARCHIVED · RECEIPT #${verified.seq ?? "?"}`, null);
+    localStorage.removeItem(PAYEE_DEAL_KEY);
+    resetPayeeUi();
+    renderPayeeAutoAccept();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function armPaperOfferAutoAccept(offer, jobSnapshot, offerSeq) {
   const identity = readIdentity(); if (!identity) return;
-  const existing = readPayeeDeal();
+  let existing = readPayeeDeal();
+  if (existing && await archiveCompletedPayeeDeal(existing, identity)) {
+    existing = null;
+    notice("Previous completed deal archived locally; arming the new job");
+  }
   if (existing) {
     const reusable = existing.offer?.id === offer.id && ["room-reservation-pending", "auto-accept-armed"].includes(existing.state);
     if (!reusable) { notice("Finish or discard the saved payee deal before arming another"); return; }
