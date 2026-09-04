@@ -1847,7 +1847,7 @@ $("#check-payee-deal").addEventListener("click", async () => {
       notice("Room is confirmed; the signed offer acceptance is now open for your confirmation");
       return;
     }
-    const accepted = await verifyAcceptRecord(await readOfferHistory(), deal.offer, deal.accept);
+    const accepted = await verifyAcceptRecord(await readOfferWindow(deal.offerSeq), deal.offer, deal.accept);
     if (!accepted) { $("#payee-status").textContent = "Accept is not yet confirmed in tclk-offers."; return; }
     const roomResponse = await fetch(`https://technocore.chat/r/${deal.room}?limit=200&format=json&n=${Date.now()}`);
     if (!roomResponse.ok) throw new Error(`Deal room read failed (${roomResponse.status})`);
