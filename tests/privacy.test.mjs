@@ -201,6 +201,9 @@ test("queues up to three accepted payee jobs without overwriting their secrets",
   assert.match(source, /queuedPayeeDeals\(\)/);
   assert.match(source, /DEADLINE PASSED · NO LOCAL LOCK/);
   assert.match(source, /continueHunterAfterQueuedDeal/);
+  assert.match(source, /detectQueuedPayeeLock/);
+  assert.match(source, /LOCK DETECTED · OFFER/);
+  assert.match(source, /received its payer lock\. Open it from the payee queue/);
   assert.match(source, /JOBS SECURED · WATCHING NEXT OFFERS/);
   assert.match(source, /tryAutoHuntFromPayload\(tail\)/);
   assert.match(source, /knownOfferIds/);
