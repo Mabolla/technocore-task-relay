@@ -410,6 +410,7 @@ function countMatches(text, expression) {
 
 export function evaluateObjectiveDelivery(jobText, deliveryText, offer) {
   const job = String(jobText || "").replace(/\s+/g, " ").trim();
+  const requirements = job.split(/\bsafety=/i)[0].trim();
   const delivery = String(deliveryText || "").replace(/\s+/g, " ").trim();
   const level = job.match(/^difficulty=(easy|medium|hard)\./i)?.[1]?.toLowerCase();
   if (!level) return { ok: false, reason: "This job has no supported deterministic validator" };
@@ -423,7 +424,7 @@ export function evaluateObjectiveDelivery(jobText, deliveryText, offer) {
   const hash = offer?.job?.id?.match(/([0-9a-f]{64})$/i)?.[1]?.toLowerCase();
   if (hash && !delivery.toLowerCase().includes(hash)) return { ok: false, reason: "Exact job hash is missing" };
   if (/signer DID/i.test(job) && offer?.from && !delivery.includes(offer.from)) return { ok: false, reason: "Exact signer DID is missing" };
-  if (/asset|paper-only|paper only/i.test(job) && !/\bPAPER\b/i.test(delivery)) return { ok: false, reason: "PAPER asset/rail result is missing" };
+  if (/asset|paper-only|paper only/i.test(requirements) && !/\bPAPER\b/i.test(delivery)) return { ok: false, reason: "PAPER asset/rail result is missing" };
   if (/signature/i.test(job) && !/(?:signature|ed25519)[^.!?]{0,40}(?:valid|pass|true)|(?:valid|pass|true)[^.!?]{0,40}(?:signature|ed25519)/i.test(delivery)) {
     return { ok: false, reason: "A passing signature result is missing" };
   }
