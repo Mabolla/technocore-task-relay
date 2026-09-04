@@ -111,6 +111,7 @@ test("renders a verified tclk track record with lifecycle sequence numbers", () 
   assert.match(source, /\["receipt", "RECEIPT"\]/);
   assert.match(source, /SUCCESSFUL · DELIVERY VERIFIED/);
   assert.match(source, /CLAIMED · RECEIPT PRESENT · NO DELIVERY/);
+  assert.match(source, /entry\.payerReceiptVerified \|\| evaluation\.ok \|\| manuallyApproved/);
   assert.match(source, /successfulTrackEntry/);
   assert.match(source, /currentActivity/);
   assert.match(source, /activityByKey/);
