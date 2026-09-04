@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeAccept, generateHashLock, makeOffer, verifySecret } from "@flop-labs/tclk";
-import { JOB_TEMPLATES, OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerDeliveryReview, makePayerRefund, makeSimpleVerificationOffer, reviewJobSpec, summarizeDealActivity, verifyBoundJobSpec, verifyExactSignedTextRecord } from "../src/tclk-browser-entry.mjs";
+import { JOB_TEMPLATES, OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, makeSimpleVerificationOffer, reviewJobSpec, summarizeDealActivity, verifyBoundJobSpec, verifyExactSignedTextRecord } from "../src/tclk-browser-entry.mjs";
 
 const payer = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -76,6 +76,17 @@ test("builds and verifies an explicit DID-signed payer FAIL review", async () =>
   const signed = { ...(await record(payerAgent, review.room, review.line, String(now + 2), new Date(now + 2).toISOString())), seq: 5 };
   assert.match(review.line, /payee .* FAIL 0 — signed delivery #2: Delivery must be 150-300 characters/);
   assert.equal((await verifyExactSignedTextRecord({ messages: [signed] }, review.line, payerAgent.did, review.room)).seq, 5);
+  assert.equal(await verifyExactSignedTextRecord({ messages: [{ ...signed, text: `${review.line} changed` }] }, review.line, payerAgent.did, review.room), null);
+});
+
+test("builds and verifies an explicit DID-signed no-delivery FAIL review", async () => {
+  const now = Date.now(); const payerAgent = await signer(); const payeeAgent = await signer();
+  const offer = makeOffer({ from: payerAgent.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 60_000, claimByMs: now + 3_600_000, refundAfterMs: now + 7_200_000, job: { proto: "a2a", id: "job-no-delivery", context: "/kv/jobs/job-no-delivery" } });
+  const accept = makeAccept(offer, { from: payeeAgent.did, statement: generateHashLock().hash });
+  const review = makePayerNoDeliveryReview(offer, accept, payerAgent.did);
+  const signed = { ...(await record(payerAgent, review.room, review.line, String(now + 2), new Date(now + 2).toISOString())), seq: 4 };
+  assert.match(review.line, /payee .* FAIL 0 — no signed delivery before reveal/);
+  assert.equal((await verifyExactSignedTextRecord({ messages: [signed] }, review.line, payerAgent.did, review.room)).seq, 4);
   assert.equal(await verifyExactSignedTextRecord({ messages: [{ ...signed, text: `${review.line} changed` }] }, review.line, payerAgent.did, review.room), null);
 });
 

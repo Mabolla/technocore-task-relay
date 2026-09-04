@@ -314,6 +314,15 @@ test("deterministic delivery failures can publish one explicit signed FAIL revie
   assert.match(source, /CLAIMED · DELIVERY REJECTED/);
 });
 
+test("claimed deals without a signed delivery can publish one explicit signed FAIL review", () => {
+  assert.match(source, /SIGN NO-DELIVERY FAIL REVIEW/);
+  assert.match(source, /makePayerNoDeliveryReview/);
+  assert.match(source, /NO DELIVERY REJECTED · FAIL REVIEW/);
+  assert.match(source, /Signed no-delivery FAIL review already exists at seq/);
+  assert.match(source, /entry\.noDeliveryRejected/);
+  assert.match(source, /CLAIMED · NO DELIVERY · REJECTED/);
+});
+
 test("payee publishes and verifies a signed delivery before revealing", () => {
   assert.match(source, /SIGN &amp; PUBLISH DELIVERY/);
   assert.match(source, /publish-payee-delivery/);

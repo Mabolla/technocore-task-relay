@@ -488,6 +488,13 @@ export function makePayerDeliveryReview(offer, accept, from, deliverySeq, verdic
   return { line, room: dealRoom(accept.contract) };
 }
 
+export function makePayerNoDeliveryReview(offer, accept, from) {
+  if (from !== offer.from) throw new Error("Only the offer payer can review the delivery");
+  if (accept.ref !== offer.id) throw new Error("A bound accepted deal is required");
+  const line = `review ${offer.id.slice(0, 18)} contract ${accept.contract.slice(0, 18)} payee ${accept.from.slice(-8)} FAIL 0 — no signed delivery before reveal`;
+  return { line, room: dealRoom(accept.contract) };
+}
+
 export function makePayerRefund(accept, from) {
   const frame = { type: "refund", from, contract: accept.contract };
   return { frame, line: encodeFrame(frame), room: dealRoom(accept.contract) };

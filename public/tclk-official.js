@@ -3617,6 +3617,12 @@ function makePayerDeliveryReview(offer, accept, from, deliverySeq, verdict, reas
   const line = `review ${offer.id.slice(0, 18)} contract ${accept.contract.slice(0, 18)} payee ${accept.from.slice(-8)} ${verdict} ${verdict === "PASS" ? 1 : 0} \u2014 signed delivery #${Number(deliverySeq)}: ${detail}`;
   return { line, room: dealRoom(accept.contract) };
 }
+function makePayerNoDeliveryReview(offer, accept, from) {
+  if (from !== offer.from) throw new Error("Only the offer payer can review the delivery");
+  if (accept.ref !== offer.id) throw new Error("A bound accepted deal is required");
+  const line = `review ${offer.id.slice(0, 18)} contract ${accept.contract.slice(0, 18)} payee ${accept.from.slice(-8)} FAIL 0 \u2014 no signed delivery before reveal`;
+  return { line, room: dealRoom(accept.contract) };
+}
 function makePayerRefund(accept, from) {
   const frame = { type: "refund", from, contract: accept.contract };
   return { frame, line: encodeFrame(frame), room: dealRoom(accept.contract) };
@@ -3659,6 +3665,7 @@ export {
   makePayeeReceipt,
   makePayeeReveal,
   makePayerDeliveryReview,
+  makePayerNoDeliveryReview,
   makePayerRefund,
   makeSimpleVerificationOffer,
   reviewJobSpec,

@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerDeliveryReview, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord, verifyExactSignedTextRecord } from "./tclk-official.js?v=signed-fail-review-1";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord, verifyExactSignedTextRecord } from "./tclk-official.js?v=no-delivery-fail-review-1";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -814,7 +814,7 @@ function autoSettleDeals() {
   return Object.values(readPayerDeals())
     .filter((deal) => deal?.offer && deal?.accept && deal?.lock)
     .filter((deal) => ["locked", "claimed", "refunded"].includes(deal.state))
-    .filter((deal) => !deal.receiptVerifiedAt && !deal.failReviewVerifiedAt);
+    .filter((deal) => !deal.receiptVerifiedAt && !deal.failReviewVerifiedAt && !deal.noDeliveryReviewVerifiedAt);
 }
 
 function payerDealLabel(deal) {
@@ -826,7 +826,13 @@ function renderPayerAutoSettle() {
   const deals = Object.values(readPayerDeals()).filter((deal) => deal?.accept?.contract && ["locked", "claimed", "refunded"].includes(deal.state));
   $("#payer-auto-settle").textContent = state.armed ? "STOP SAFE AUTO-SETTLE" : "ARM SAFE AUTO-SETTLE";
   $("#payer-auto-settle-status").textContent = `${state.armed ? "ARMED · TAB MUST STAY OPEN" : "OFF"}\n${deals.length ? deals.map((deal) => {
-    const status = deal.receiptVerifiedAt ? "TERMINAL RECEIPT VERIFIED" : deal.failReviewVerifiedAt ? `DELIVERY REJECTED · FAIL REVIEW #${deal.failReviewSeq ?? "?"}` : deal.autoSettleStatus || (deal.state === "locked" ? "WAITING FOR SIGNED DELIVERY / REVEAL" : "CHECKING TERMINAL STATE");
+    const status = deal.receiptVerifiedAt
+      ? "TERMINAL RECEIPT VERIFIED"
+      : deal.failReviewVerifiedAt
+        ? `DELIVERY REJECTED · FAIL REVIEW #${deal.failReviewSeq ?? "?"}`
+        : deal.noDeliveryReviewVerifiedAt
+          ? `NO DELIVERY REJECTED · FAIL REVIEW #${deal.noDeliveryReviewSeq ?? "?"}`
+          : deal.autoSettleStatus || (deal.state === "locked" ? "WAITING FOR SIGNED DELIVERY / REVEAL" : "CHECKING TERMINAL STATE");
     return `${payerDealLabel(deal)}: ${status}`;
   }).join("\n") : "No locked payer deals saved."}${state.armed ? `\nPending: ${autoSettleDeals().length} · checking every 30 seconds` : ""}`;
 }
@@ -867,6 +873,10 @@ function payerFailReview(deal) {
   return makePayerDeliveryReview(deal.offer, deal.accept, deal.offer.from, Number(deal.deliverySeq), "FAIL", deal.deliveryEvaluation.reason);
 }
 
+function payerNoDeliveryReview(deal) {
+  return makePayerNoDeliveryReview(deal.offer, deal.accept, deal.offer.from);
+}
+
 async function inspectPayerFailReview(deal, roomPayload) {
   if (!deterministicDeliveryFailure(deal)) {
     delete deal.failReviewSeq;
@@ -879,6 +889,22 @@ async function inspectPayerFailReview(deal, roomPayload) {
   deal.failReviewSeq = existing.seq;
   deal.failReviewVerifiedAt = new Date().toISOString();
   deal.autoSettleStatus = `DELIVERY REJECTED · FAIL REVIEW #${existing.seq ?? "?"}`;
+  return existing;
+}
+
+async function inspectPayerNoDeliveryReview(deal, roomPayload) {
+  const noDeliveryClaim = deal?.state === "claimed" && deal?.railState === "claimed" && deal.deliverySeq == null;
+  if (!noDeliveryClaim) {
+    delete deal.noDeliveryReviewSeq;
+    delete deal.noDeliveryReviewVerifiedAt;
+    return null;
+  }
+  const review = payerNoDeliveryReview(deal);
+  const existing = await verifyExactSignedTextRecord(roomPayload, review.line, deal.offer.from, review.room);
+  if (!existing) return null;
+  deal.noDeliveryReviewSeq = existing.seq;
+  deal.noDeliveryReviewVerifiedAt = new Date().toISOString();
+  deal.autoSettleStatus = `NO DELIVERY REJECTED · FAIL REVIEW #${existing.seq ?? "?"}`;
   return existing;
 }
 
@@ -994,19 +1020,18 @@ async function inspectAndAutoSettle(deal) {
     return;
   }
 
-  const revealSeq = folded.applied.find((entry) => entry.frame.type === "reveal")?.seq;
-  const delivery = deliveries.filter((entry) => revealSeq == null || entry.seq == null || Number(entry.seq) < Number(revealSeq)).at(-1);
-  if (!delivery) {
-    deal.autoSettleStatus = "REVIEW REQUIRED · NO SIGNED DELIVERY BEFORE REVEAL";
+  const inspected = await inspectSignedPayerDelivery(deal, roomPayload, folded);
+  if (!inspected) {
+    const rejected = await inspectPayerNoDeliveryReview(deal, roomPayload);
+    deal.autoSettleStatus = rejected ? `NO DELIVERY REJECTED · FAIL REVIEW #${rejected.seq ?? "?"}` : "REVIEW REQUIRED · NO SIGNED DELIVERY BEFORE REVEAL";
     updateStoredPayerDeal(deal);
-    notifyAutoSettle(deal, `review:no-delivery:${revealSeq}`, "Technocore review required", `${payerDealLabel(deal)} revealed without a signed delivery that can be auto-approved.`);
+    if (!rejected) {
+      const revealSeq = folded.applied.find((entry) => entry.frame.type === "reveal")?.seq;
+      notifyAutoSettle(deal, `review:no-delivery:${revealSeq}`, "Technocore review required", `${payerDealLabel(deal)} revealed without a signed delivery that can be auto-approved.`);
+    }
     return;
   }
-  const job = await readJobForAutoSettle(deal);
-  const evaluation = job ? evaluateObjectiveDelivery(job.text, delivery.text, deal.offer) : { ok: false, reason: "Job specification is not machine-verifiable" };
-  deal.deliverySeq = delivery.seq;
-  deal.deliveryPreview = delivery.text.slice(0, 500);
-  deal.deliveryEvaluation = evaluation;
+  const { delivery, evaluation } = inspected;
   if (!evaluation.ok) {
     const rejected = await inspectPayerFailReview(deal, roomPayload);
     deal.autoSettleStatus = rejected ? `DELIVERY REJECTED · FAIL REVIEW #${rejected.seq ?? "?"}` : `REVIEW REQUIRED · ${evaluation.reason}`;
@@ -1058,6 +1083,7 @@ function renderPayerDeal() {
   $("#refund-payer-deal").disabled = !(deal?.state === "locked" && deal?.railState === "locked" && Date.now() >= deal.offer.refundAfterMs);
   $("#publish-payer-receipt").disabled = !terminal;
   $("#publish-payer-fail-review").disabled = !(claimedTerminal && deterministicDeliveryFailure(deal) && !deal.failReviewVerifiedAt);
+  $("#publish-payer-no-delivery-review").disabled = !(claimedTerminal && deal.deliverySeq == null && !deal.noDeliveryReviewVerifiedAt);
   const deliveryStatus = $("#payer-delivery-status");
   const approveDelivery = $("#approve-payer-delivery");
   if (approveDelivery) {
@@ -1068,7 +1094,7 @@ function renderPayerDeal() {
     deliveryStatus.textContent = !deal
       ? "No signed delivery checked."
       : deal.deliverySeq == null
-        ? "BLOCKED · No signed non-tclk result from the accepted payee was verified before reveal."
+        ? `${deal.noDeliveryReviewVerifiedAt ? "REJECTED · SIGNED NO-DELIVERY FAIL REVIEW VERIFIED" : "BLOCKED"} · No signed non-tclk result from the accepted payee was verified before reveal.`
         : `${deal.failReviewVerifiedAt ? "REJECTED · SIGNED FAIL REVIEW VERIFIED" : deal.deliveryEvaluation?.ok ? "PASSED" : deal.deliveryReviewAllowed ? "HUMAN REVIEW REQUIRED" : "FAILED"} · SIGNED DELIVERY #${deal.deliverySeq}\n${deal.deliveryEvaluation?.reason || "Not evaluated"}\n\n${deal.deliveryPreview || ""}`;
   }
   if (!deal) {
@@ -1079,8 +1105,10 @@ function renderPayerDeal() {
   const rail = deal.railState || "check required";
   const next = state === "refunded" && rail === "refunded"
     ? "NEXT: Sign the refunded terminal receipt to archive the outcome."
+    : state === "claimed" && rail === "claimed" && deal.noDeliveryReviewVerifiedAt
+      ? `TERMINAL: Signed no-delivery FAIL review verified at seq #${deal.noDeliveryReviewSeq ?? "?"}; no payer PASS receipt will be issued.`
     : state === "claimed" && rail === "claimed" && deal.deliverySeq == null
-      ? "BLOCKED: Reveal/claim exists, but no signed job delivery was verified before it. Receipt stays disabled."
+      ? "NEXT: Reveal/claim exists, but no signed job delivery was verified before it. Receipt stays disabled; publish a signed no-delivery FAIL review."
     : state === "claimed" && rail === "claimed" && deal.failReviewVerifiedAt
       ? `TERMINAL: Signed FAIL review verified at seq #${deal.failReviewSeq ?? "?"}; no payer PASS receipt will be issued.`
     : state === "claimed" && rail === "claimed" && deal.deliveryReviewAllowed && !claimedDeliveryApproved(deal)
@@ -1146,6 +1174,33 @@ $("#publish-payer-fail-review")?.addEventListener("click", async () => {
     saveActivePayerDeal(deal); renderPayerDeal();
     notice("Signed FAIL review opened; confirm Technocore says ok, then press VERIFY LOCK / CHECK RESULT");
   } catch (error) { notice(`FAIL review blocked: ${error.message}`); }
+});
+
+$("#publish-payer-no-delivery-review")?.addEventListener("click", async () => {
+  const identity = readIdentity(); const deal = readPayerDeal();
+  if (!identity || identity.did !== deal?.offer?.from || deal?.state !== "claimed" || deal?.railState !== "claimed") return;
+  try {
+    const response = await fetch(`https://technocore.chat/r/${deal.lock.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+    if (!response.ok) throw new Error(`Deal room read failed (${response.status})`);
+    const roomPayload = await response.json();
+    const folded = await foldPayeeDeal(roomPayload, deal.offer, deal.accept);
+    await inspectSignedPayerDelivery(deal, roomPayload, folded);
+    if (folded.state.status !== "claimed" || deal.deliverySeq != null) throw new Error("This deal no longer qualifies as a claimed deal without a signed delivery before reveal");
+    const review = payerNoDeliveryReview(deal);
+    const existing = await inspectPayerNoDeliveryReview(deal, roomPayload);
+    if (existing) {
+      saveActivePayerDeal(deal); renderPayerDeal();
+      notice(`Signed no-delivery FAIL review already exists at seq #${existing.seq ?? "?"}; no duplicate was published`);
+      return;
+    }
+    if (!window.confirm(`Publish this DID-signed payer rejection?\n\n${review.line}\n\nThis records that no signed delivery existed before reveal and will not issue a PASS receipt.`)) return;
+    const nonce = Date.now(); const signature = await sign(identity, review.room, nonce, review.line);
+    window.open(signedUrl(review.room, identity, signature, nonce, review.line), "_blank", "noopener,noreferrer");
+    deal.noDeliveryReviewSubmittedAt = new Date().toISOString();
+    deal.autoSettleStatus = "NO-DELIVERY FAIL REVIEW SUBMISSION OPENED · VERIFYING TRANSCRIPT";
+    saveActivePayerDeal(deal); renderPayerDeal();
+    notice("Signed no-delivery FAIL review opened; confirm Technocore says ok, then press VERIFY LOCK / CHECK RESULT");
+  } catch (error) { notice(`No-delivery FAIL review blocked: ${error.message}`); }
 });
 const agentNameOf = (identity) => identity?.agentName || (identity?.did === CREATOR_DID ? "Mabolla Agent" : "Task Relay Agent");
 const initialsOf = (name) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "TR";
@@ -1538,6 +1593,7 @@ $("#check-payer-deal").addEventListener("click", async () => {
     deal.state = folded.state.status; deal.railState = railState; deal.checkedAt = new Date().toISOString();
     await inspectSignedPayerDelivery(deal, roomPayload, folded);
     await inspectPayerFailReview(deal, roomPayload);
+    await inspectPayerNoDeliveryReview(deal, roomPayload);
     saveActivePayerDeal(deal);
     renderPayerDeal();
     notice(folded.state.status === "claimed"
@@ -1958,6 +2014,7 @@ function successfulTrackEntry(entry) {
 
 function statusLabel(entry) {
   if (successfulTrackEntry(entry)) return "SUCCESSFUL · DELIVERY VERIFIED";
+  if (entry.noDeliveryRejected) return "CLAIMED · NO DELIVERY · REJECTED";
   if (entry.deliveryRejected) return "CLAIMED · DELIVERY REJECTED";
   if (entry.status === "claimed" && entry.seqs?.receipt && entry.deliverySeq == null) return "CLAIMED · RECEIPT PRESENT · NO DELIVERY";
   if (entry.status === "claimed" && entry.seqs?.receipt) return "CLAIMED · DELIVERY UNVERIFIED";
@@ -2013,7 +2070,7 @@ function renderTrackRecord() {
     chain.textContent = parts.length ? parts.join(" → ") : "No verified seq";
     const status = document.createElement("td");
     const label = document.createElement("div"); label.textContent = statusLabel(entry); status.append(label);
-    if (entry.role === "payer" && entry.accept && (["accepted", "locked"].includes(entry.status) || (entry.status === "claimed" && !entry.deliveryVerified && !entry.deliveryRejected))) {
+    if (entry.role === "payer" && entry.accept && (["accepted", "locked"].includes(entry.status) || (entry.status === "claimed" && !entry.deliveryVerified && !entry.deliveryRejected && !entry.noDeliveryRejected))) {
       const resume = document.createElement("button");
       const expired = entry.offer.refundAfterMs <= Date.now();
       resume.textContent = entry.status === "claimed" ? "REVIEW DELIVERY" : expired ? "PAST REFUND WINDOW" : "RESUME DEAL";
@@ -2067,6 +2124,14 @@ async function syncTrackRecord({ announce = true } = {}) {
           entry.payerReceiptSeq = payerReceipt?.seq ?? null;
           entry.payerReceiptVerified = Boolean(payerReceipt);
           entry.deliveryVerified = Boolean(delivery && payerReceipt);
+          entry.deliveryRejected = false;
+          entry.noDeliveryRejected = false;
+          if (deal.status === "claimed" && !delivery) {
+            const noDeliveryReview = makePayerNoDeliveryReview(entry.offer, entry.accept, entry.offer.from);
+            const verifiedNoDeliveryFailure = await verifyExactSignedTextRecord(roomPayload, noDeliveryReview.line, entry.offer.from, noDeliveryReview.room);
+            entry.noDeliveryRejected = Boolean(verifiedNoDeliveryFailure);
+            entry.seqs.review = verifiedNoDeliveryFailure?.seq ?? entry.seqs.review;
+          }
         }
       } else if (entry.offer.expiresMs <= Date.now()) entry.status = "expired";
       const jobUrl = contextUrl(entry.offer.job.context);
