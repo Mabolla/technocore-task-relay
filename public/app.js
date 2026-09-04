@@ -1729,6 +1729,13 @@ async function syncTrackRecord({ announce = true } = {}) {
           const delivery = deliveries.filter((item) => deal.seqs.reveal == null || item.seq == null || Number(item.seq) < Number(deal.seqs.reveal)).at(-1);
           entry.deliverySeq = delivery?.seq ?? null;
           entry.deliveryText = delivery?.text ?? null;
+          const expectedPayerReceipt = makePayeeReceipt(entry.accept, entry.offer.from, "claimed");
+          const payerReceipt = deal.status === "claimed"
+            ? await verifyExactFrameRecord(roomPayload, expectedPayerReceipt.frame, expectedPayerReceipt.room)
+            : null;
+          entry.payerReceiptSeq = payerReceipt?.seq ?? null;
+          entry.payerReceiptVerified = Boolean(payerReceipt);
+          entry.deliveryVerified = Boolean(delivery && payerReceipt);
         }
       } else if (entry.offer.expiresMs <= Date.now()) entry.status = "expired";
       const jobUrl = contextUrl(entry.offer.job.context);
@@ -1742,7 +1749,7 @@ async function syncTrackRecord({ announce = true } = {}) {
               const evaluation = evaluateObjectiveDelivery(spec.text, entry.deliveryText, entry.offer);
               const saved = readPayerDeals()[entry.contract];
               const manuallyApproved = deliveryNeedsHumanReview(evaluation) && String(saved?.manualDeliveryApprovedSeq) === String(entry.deliverySeq);
-              entry.deliveryVerified = evaluation.ok || manuallyApproved;
+              entry.deliveryVerified = entry.payerReceiptVerified || evaluation.ok || manuallyApproved;
               entry.deliveryEvaluationReason = evaluation.reason;
             }
           }
