@@ -124,7 +124,9 @@ Arms once, selects the newest safe job, then reserves its room before publishing
 Choose a scanned job and press ARM AUTO-ACCEPT.</pre></section>
         <button id="payee-auto-accept-stop" type="button" disabled>STOP AUTO-ACCEPT</button>
         <section class="preview"><b>ACTIVE PAYEE DEAL</b><pre id="payee-status">No offer accepted by this browser.</pre></section>
-        <label class="confirm"><input id="work-complete" type="checkbox" disabled><span>I completed the measurable job and independently verified the payer's PaperRail lock.</span></label>
+        <label>Signed job delivery<textarea id="payee-delivery" maxlength="2000" placeholder="Enter the exact completed result that the payer must verify." disabled></textarea></label>
+        <button class="primary full-width" id="publish-payee-delivery" type="button" disabled>SIGN &amp; PUBLISH DELIVERY</button>
+        <label class="confirm"><input id="work-complete" type="checkbox" disabled><span>I verified that my signed delivery is present in the deal room and the payer's PaperRail lock is valid.</span></label>
         <div class="tclk-grid">
           <button class="primary" id="publish-reveal" type="button" disabled>SIGN &amp; REVEAL TO CLAIM</button>
           <button id="claim-paper" type="button" disabled>ADVANCE PAPER RAIL TO CLAIMED</button>
@@ -165,6 +167,6 @@ Choose a scanned job and press ARM AUTO-ACCEPT.</pre></section>
       <button class="primary" type="submit">SIGN & PUBLISH →</button>
     </form>
   </dialog>
-  <script type="module" src="./app.js?v=broader-job-scan-2"></script>
+  <script type="module" src="./app.js?v=delivery-publish-1"></script>
 </body>
 </html>
