@@ -1376,6 +1376,9 @@ function resetPayeeUi() {
   $("#discard-payee-deal").disabled = true;
   $("#work-complete").checked = false;
   $("#work-complete").disabled = true;
+  $("#payee-delivery").value = "";
+  $("#payee-delivery").disabled = true;
+  $("#publish-payee-delivery").disabled = true;
   $("#publish-reveal").disabled = true;
   $("#claim-paper").disabled = true;
   $("#publish-receipt").disabled = true;
@@ -1848,7 +1851,8 @@ $("#check-payee-deal").addEventListener("click", async () => {
     if (!accepted) { $("#payee-status").textContent = "Accept is not yet confirmed in tclk-offers."; return; }
     const roomResponse = await fetch(`https://technocore.chat/r/${deal.room}?limit=200&format=json&n=${Date.now()}`);
     if (!roomResponse.ok) throw new Error(`Deal room read failed (${roomResponse.status})`);
-    const folded = await foldPayeeDeal(await roomResponse.json(), deal.offer, deal.accept);
+    const roomPayload = await roomResponse.json();
+    const folded = await foldPayeeDeal(roomPayload, deal.offer, deal.accept);
     let lockValid = false; let railState = "absent";
     if (folded.state.status === "locked" || folded.state.status === "claimed") {
       const expected = expectedPaperLock(deal.offer, deal.accept);
@@ -1859,12 +1863,19 @@ $("#check-payee-deal").addEventListener("click", async () => {
       lockValid = railState === "locked" || railState === "claimed";
       if (!lockValid) throw new Error("PaperRail note is missing or does not match the signed contract");
     }
+    const deliveries = await listSignedDeliveries(roomPayload, deal.accept);
+    const delivery = deliveries.at(-1) || null;
     deal.state = folded.state.status; deal.acceptSeq = accepted.seq; deal.lockValid = lockValid; deal.railState = railState;
+    deal.deliverySeq = delivery?.seq ?? null;
+    deal.deliveryText = delivery?.text ?? null;
     localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
-    $("#work-complete").disabled = folded.state.status !== "locked" || !lockValid;
+    $("#payee-delivery").disabled = folded.state.status !== "locked" || !lockValid || Boolean(delivery);
+    $("#publish-payee-delivery").disabled = folded.state.status !== "locked" || !lockValid || Boolean(delivery);
+    if (delivery) $("#payee-delivery").value = delivery.text;
+    $("#work-complete").disabled = folded.state.status !== "locked" || !lockValid || !delivery;
     $("#claim-paper").disabled = !(folded.state.status === "claimed" && railState === "locked");
     $("#publish-receipt").disabled = !(folded.state.status === "claimed" && railState === "claimed");
-    $("#payee-status").textContent = `ACCEPT VERIFIED · seq #${accepted.seq}\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.room}\nTranscript state: ${folded.state.status}\nPaperRail state: ${railState}`;
+    $("#payee-status").textContent = `ACCEPT VERIFIED · seq #${accepted.seq}\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.room}\nTranscript state: ${folded.state.status}\nPaperRail state: ${railState}\nSigned delivery: ${delivery ? `VERIFIED · seq #${delivery.seq ?? "?"}` : "NOT PUBLISHED"}`;
     notice(`Payee deal state: ${folded.state.status}`);
     void syncTrackRecord({ announce: false });
   } catch (error) { $("#payee-status").textContent = `Deal check failed: ${error.message}`; }
@@ -1920,11 +1931,41 @@ $("#claim-paper").addEventListener("click", async () => {
 });
 
 $("#work-complete").addEventListener("change", (event) => {
-  const deal = readPayeeDeal(); $("#publish-reveal").disabled = !(event.target.checked && deal?.state === "locked" && deal?.lockValid);
+  const deal = readPayeeDeal(); $("#publish-reveal").disabled = !(event.target.checked && deal?.state === "locked" && deal?.lockValid && deal?.deliverySeq != null);
+});
+
+$("#publish-payee-delivery").addEventListener("click", async () => {
+  const identity = readIdentity(); const deal = readPayeeDeal();
+  if (!identity || !deal?.lockValid || deal.state !== "locked") return;
+  const text = clean($("#payee-delivery").value);
+  if (text.length < 3 || text.length > 2000 || text.startsWith("tclk1 ")) {
+    notice("Delivery must be a 3-2000 character non-tclk result"); return;
+  }
+  try {
+    const roomResponse = await fetch(`https://technocore.chat/r/${deal.room}?limit=200&format=json&n=${Date.now()}`, { cache: "no-store" });
+    if (!roomResponse.ok) throw new Error(`Deal room read failed (${roomResponse.status})`);
+    const existing = (await listSignedDeliveries(await roomResponse.json(), deal.accept)).find((item) => item.text === text);
+    if (existing) {
+      deal.deliverySeq = existing.seq ?? null; deal.deliveryText = existing.text;
+      localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
+      notice(`Exact signed delivery already exists at seq #${existing.seq ?? "?"}; no duplicate opened`);
+      return;
+    }
+    if (!window.confirm(`Publish this exact signed job delivery before reveal?\n\n${text}`)) return;
+    const nonce = Date.now(); const signature = await sign(identity, deal.room, nonce, text);
+    window.open(signedUrl(deal.room, identity, signature, nonce, text), "_blank", "noopener,noreferrer");
+    notice("Signed delivery opened; confirm Technocore says ok, then press CHECK ACTIVE DEAL");
+  } catch (error) { notice(`Delivery publication blocked: ${error.message}`); }
 });
 
 $("#publish-reveal").addEventListener("click", async () => {
   const identity = readIdentity(); const deal = readPayeeDeal(); if (!identity || !deal?.lockValid || deal.state !== "locked") return;
+  const roomResponse = await fetch(`https://technocore.chat/r/${deal.room}?limit=200&format=json&n=${Date.now()}`, { cache: "no-store" });
+  if (!roomResponse.ok) { notice(`Reveal blocked: deal room read failed (${roomResponse.status})`); return; }
+  const delivery = (await listSignedDeliveries(await roomResponse.json(), deal.accept)).at(-1);
+  if (!delivery) { notice("Reveal blocked: publish and verify the signed job delivery first"); return; }
+  deal.deliverySeq = delivery.seq ?? null; deal.deliveryText = delivery.text;
+  localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
   const vaultPassword = window.prompt("Enter the deal-vault password to decrypt the reveal secret."); if (!vaultPassword) return;
   let secret; try { secret = await openSecret(vaultPassword, deal.accept.contract, deal.sealedSecret); } catch { notice("Deal-vault password is incorrect"); return; }
   const reveal = makePayeeReveal(deal.accept, identity.did, secret);
