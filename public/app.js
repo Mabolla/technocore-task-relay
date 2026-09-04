@@ -362,6 +362,31 @@ function renderPayeeDealQueue() {
   }));
 }
 
+async function detectQueuedPayeeLock() {
+  const candidates = activePayeeDeals().filter((deal) => deal.state === "accepted" && !deal.lockDetectedAt);
+  const checked = await Promise.all(candidates.map(async (deal) => {
+    try {
+      const response = await fetch(`https://technocore.chat/r/${deal.room}?limit=200&format=json&n=${Date.now()}`, {
+        headers: { accept: "application/json" },
+        cache: "no-store",
+        signal: AbortSignal.timeout(4_000),
+      });
+      if (!response.ok) return null;
+      const folded = await foldPayeeDeal(await response.json(), deal.offer, deal.accept);
+      if (!["locked", "claimed"].includes(folded.state.status)) return null;
+      deal.state = folded.state.status;
+      deal.lockDetectedAt = new Date().toISOString();
+      rememberPayeeDeal(deal);
+      return deal;
+    } catch {
+      return null;
+    }
+  }));
+  const ready = checked.find(Boolean) || null;
+  if (ready) renderPayeeDealQueue();
+  return ready;
+}
+
 function stopPayeeAutoAccept(reason, deal = readPayeeDeal()) {
   const state = readPayeeAutoAccept();
   localStorage.setItem(PAYEE_AUTO_ACCEPT_KEY, JSON.stringify({ ...state, armed: false, stoppedAt: new Date().toISOString(), reason }));
@@ -457,8 +482,15 @@ async function continueHunterAfterQueuedDeal(deal) {
   notifyPayeeAutoAccept("Technocore job hunter resumed", `Offer #${deal.offerSeq ?? "?"} is queued; watching for another job.`);
   setTimeout(() => {
     payeeAutoHunterRunning = false;
-    void tryAutoHuntFromPayload(tail)
-      .then((matched) => { if (!matched) void runPayeeAutoHunter(); })
+    void detectQueuedPayeeLock()
+      .then(async (ready) => {
+        if (ready) {
+          stopPayeeAutoHunter(`LOCK DETECTED · OFFER #${ready.offerSeq ?? "?"} READY TO WORK`);
+          notifyPayeeAutoAccept("Payee job ready", `Offer #${ready.offerSeq ?? "?"} received its payer lock. Open it from the payee queue.`);
+          return;
+        }
+        if (!await tryAutoHuntFromPayload(tail)) void runPayeeAutoHunter();
+      })
       .catch((error) => {
         const state = readPayeeAutoHunter();
         savePayeeAutoHunter({ ...state, status: `TEMPORARY ERROR · ${error.message} · RETRYING` });
@@ -689,6 +721,12 @@ async function runPayeeAutoHunter() {
   try {
     while (readPayeeAutoHunter().armed) {
       const state = readPayeeAutoHunter();
+      const ready = await detectQueuedPayeeLock();
+      if (ready) {
+        stopPayeeAutoHunter(`LOCK DETECTED · OFFER #${ready.offerSeq ?? "?"} READY TO WORK`);
+        notifyPayeeAutoAccept("Payee job ready", `Offer #${ready.offerSeq ?? "?"} received its payer lock. Open it from the payee queue.`);
+        break;
+      }
       const response = await fetch(`https://technocore.chat/r/${OFFER_ROOM}?since=${state.cursor}&wait=10&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
       if (!response.ok) throw new Error(`Offer stream failed (${response.status})`);
       const payload = await response.json();
