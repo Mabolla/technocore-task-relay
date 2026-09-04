@@ -233,7 +233,7 @@ async function runPayerAutopilot() {
   try {
     while (readPayerAutopilot().armed) {
       const state = readPayerAutopilot();
-      const response = await fetch(`https://technocore.chat/r/events?since=${state.cursor}&wait=2&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+      const response = await fetch(`https://technocore.chat/r/events?since=${state.cursor}&wait=10&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
       if (!response.ok) throw new Error(`Event stream failed (${response.status})`);
       const payload = await response.json();
       const messages = Array.isArray(payload.messages) ? payload.messages : [];
@@ -465,7 +465,7 @@ async function runPayeeAutoAccept() {
         break;
       }
       const state = readPayeeAutoAccept();
-      const response = await fetch(`https://technocore.chat/r/events?since=${state.cursor}&wait=10&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+      const response = await fetch(`https://technocore.chat/r/events?since=${state.cursor}&wait=2&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
       if (!response.ok) throw new Error(`Event stream failed (${response.status})`);
       const payload = await response.json();
       const messages = Array.isArray(payload.messages) ? payload.messages : [];
