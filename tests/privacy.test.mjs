@@ -210,6 +210,8 @@ test("queues up to three accepted payee jobs without overwriting their secrets",
   assert.match(source, /PAYEE DEAL QUEUE · MAX 3/);
   assert.match(source, /OPEN \/ CHECK →/);
   assert.match(source, /Offer #\$\{existing\.offerSeq \?\? "\?"\} parked safely in the payee queue/);
+  assert.match(source, /const parkable = Boolean\(deal\?\.acceptSeq && !recoverable\)/);
+  assert.match(source, /PARK ACTIVE DEAL & ARM AUTO-JOB HUNTER/);
 });
 
 test("only discards a payee deal after confirming its accept is absent", () => {
