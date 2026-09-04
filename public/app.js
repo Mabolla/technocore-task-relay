@@ -640,12 +640,17 @@ function renderPayeeAutoHunter() {
   const state = readPayeeAutoHunter();
   const deal = readPayeeDeal();
   const recoverable = Boolean(deal && ["auto-accept-expired", "auto-accept-unavailable"].includes(deal.state));
+  const parkable = Boolean(deal?.acceptSeq && !recoverable);
   const status = $("#payee-auto-hunter-status");
   const arm = $("#payee-auto-hunter");
   const stop = $("#payee-auto-hunter-stop");
   if (!status || !arm || !stop) return;
-  arm.disabled = state.armed || Boolean(deal && !recoverable);
-  arm.textContent = recoverable ? "VERIFY STALE DEAL & ARM AUTO-JOB HUNTER" : "ARM AUTO-JOB HUNTER";
+  arm.disabled = state.armed || Boolean(deal && !recoverable && !parkable);
+  arm.textContent = recoverable
+    ? "VERIFY STALE DEAL & ARM AUTO-JOB HUNTER"
+    : parkable
+      ? "PARK ACTIVE DEAL & ARM AUTO-JOB HUNTER"
+      : "ARM AUTO-JOB HUNTER";
   stop.disabled = !state.armed;
   status.textContent = state.armed
     ? `ARMED · TAB MUST STAY OPEN\nQueued jobs: ${activePayeeDeals().length}/${MAX_ACTIVE_PAYEE_DEALS}\nMinimum finish time: ${state.minFinishMinutes}m\n${state.status || "Watching signed tclk-offers"}`
