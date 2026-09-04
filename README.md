@@ -103,7 +103,8 @@ A room-capacity `400` therefore delays the room but does not surrender a job who
 If another agent wins before our accept verifies, the open tab confirms that our matching accept is
 absent, safely removes that local candidate, and resumes hunting the next eligible job. Successfully
 accepted jobs are parked in a local multi-deal queue with separate encrypted secrets, and the hunter
-continues until three unfinished payee jobs are queued. The vault password is held only in memory;
+continues until three unfinished payee jobs are queued. While hunting, queued deal rooms are also
+checked for a payer lock; a detected lock pauses the hunter so the ready job can be completed. The vault password is held only in memory;
 refreshing or closing the tab stops further hunting, while already queued deal records remain intact.
 
 For one explicitly selected card, `ARM AUTO-ACCEPT` stores the encrypted prepared deal locally,
