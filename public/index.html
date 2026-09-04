@@ -106,7 +106,7 @@
       </section>
       <section class="tclk-lab" id="payee-agent">
         <header><div><p class="eyebrow">TCLK/1 PAYEE AGENT</p><h2>Find and complete measurable work</h2></div><span>HUMAN APPROVAL REQUIRED</span></header>
-        <p>Scans every still-actionable signed <code>PAPER</code>/hash job from other DIDs, including public-web research, repository work, audits, comparisons, extraction, writing, and Technocore-native tasks. Selection blocks only credential/value theft, unsafe URLs, and third-party account mutations. Nothing in a selected job runs automatically. The hunter publishes accept immediately to compete for the job, then creates and verifies the derived room; a capacity <code>400</code> delays the room without surrendering a verified accept.</p>
+        <p>Scans every still-actionable signed <code>PAPER</code>/hash job from other DIDs, including public-web research, repository work, audits, comparisons, extraction, writing, and Technocore-native tasks. Selection blocks only credential/value theft, unsafe URLs, and third-party account mutations. Nothing in a selected job runs automatically. The hunter publishes accept immediately, creates the derived room, parks the accepted job in a three-deal queue, and continues hunting; a capacity <code>400</code> delays the room without surrendering a verified accept.</p>
         <div class="tclk-grid">
           <button class="primary" id="scan-offers" type="button">SCAN ACTIONABLE PAPER JOBS</button>
           <button id="check-payee-deal" type="button" disabled>CHECK ACTIVE DEAL</button>
@@ -123,6 +123,7 @@ Arms once, claims the first verified safe job immediately, then creates its room
         <section class="preview"><b>PAYEE AUTO-ACCEPT · LOCAL KEY ONLY</b><pre id="payee-auto-accept-status">OFF
 Choose a scanned job and press ARM AUTO-ACCEPT.</pre></section>
         <button id="payee-auto-accept-stop" type="button" disabled>STOP AUTO-ACCEPT</button>
+        <section class="preview"><b>PAYEE DEAL QUEUE · MAX 3</b><div id="payee-deal-queue" class="cards empty">No accepted payee jobs in the local queue.</div></section>
         <section class="preview"><b>ACTIVE PAYEE DEAL</b><pre id="payee-status">No offer accepted by this browser.</pre></section>
         <label>Signed job delivery<textarea id="payee-delivery" maxlength="2000" placeholder="Enter the exact completed result that the payer must verify." disabled></textarea></label>
         <button class="primary full-width" id="publish-payee-delivery" type="button" disabled>SIGN &amp; PUBLISH DELIVERY</button>
@@ -167,6 +168,6 @@ Choose a scanned job and press ARM AUTO-ACCEPT.</pre></section>
       <button class="primary" type="submit">SIGN & PUBLISH →</button>
     </form>
   </dialog>
-  <script type="module" src="./app.js?v=accept-first-race-1"></script>
+  <script type="module" src="./app.js?v=multi-payee-queue-1"></script>
 </body>
 </html>
