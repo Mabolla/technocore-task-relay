@@ -425,7 +425,7 @@ export function evaluateObjectiveDelivery(jobText, deliveryText, offer) {
   if (hash && !delivery.toLowerCase().includes(hash)) return { ok: false, reason: "Exact job hash is missing" };
   if (/signer DID/i.test(job) && offer?.from && !delivery.includes(offer.from)) return { ok: false, reason: "Exact signer DID is missing" };
   if (/asset|paper-only|paper only/i.test(requirements) && !/\bPAPER\b/i.test(delivery)) return { ok: false, reason: "PAPER asset/rail result is missing" };
-  if (/signature/i.test(job) && !/(?:signature|ed25519)[^.!?]{0,40}(?:valid|pass|true)|(?:valid|pass|true)[^.!?]{0,40}(?:signature|ed25519)/i.test(delivery)) {
+  if (/signature/i.test(job) && !/(?:signature|ed25519)[^.!?]{0,200}(?:valid|pass|true)|(?:valid|pass|true)[^.!?]{0,200}(?:signature|ed25519)/i.test(delivery)) {
     return { ok: false, reason: "A passing signature result is missing" };
   }
 

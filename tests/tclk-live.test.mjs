@@ -51,6 +51,8 @@ test("auto-settle accepts only a signed delivery that passes a supported determi
   const hash = prepared.offer.job.id.slice(-64);
   const passing = `PASS ${hash} ${payer} PAPER transport signature valid. Exact job hash and signed offer binding independently match.`;
   assert.equal(evaluateObjectiveDelivery(job, passing, prepared.offer).ok, true);
+  const detailedSignatureEvidence = `PASS ${hash} transport signature over tclk-offers|1800000000000|<exact offer text> verifies PASS, and the transport signer equals offer.from.`;
+  assert.equal(evaluateObjectiveDelivery(job, detailedSignatureEvidence, prepared.offer).ok, true);
   assert.equal(evaluateObjectiveDelivery(job, passing.replace(" PAPER", ""), prepared.offer).ok, true);
   assert.match(evaluateObjectiveDelivery(job, passing.replace(hash, "b".repeat(64)), prepared.offer).reason, /hash is missing/);
   assert.match(evaluateObjectiveDelivery(job, passing.replace("PASS", "FAIL"), prepared.offer).reason, /failed check/);
