@@ -267,6 +267,7 @@ test("manual payer settlement requires a signed delivery and blocks duplicate re
 test("payee publishes and verifies a signed delivery before revealing", () => {
   assert.match(source, /SIGN &amp; PUBLISH DELIVERY/);
   assert.match(source, /publish-payee-delivery/);
+  assert.match(source, /deal\.acceptSeq\s*\?\s*\{ seq: deal\.acceptSeq \}/);
   assert.match(source, /Signed delivery:.*NOT PUBLISHED/);
   assert.match(source, /Exact signed delivery already exists at seq/);
   assert.match(source, /Reveal blocked: publish and verify the signed job delivery first/);
