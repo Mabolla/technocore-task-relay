@@ -221,6 +221,49 @@ export async function listMyPaperActivity(raw, myDid, now = Date.now()) {
   return activity.sort((a, b) => Number(b.offerSeq || 0) - Number(a.offerSeq || 0));
 }
 
+export async function listRecentAcceptedPayerDeals(raw, payerDids, now = Date.now(), limitPerPayer = 3) {
+  const targets = new Set(Array.from(payerDids || []).filter((did) => /^did:key:z6Mk/.test(did)));
+  if (!targets.size || !Number.isInteger(limitPerPayer) || limitPerPayer < 1) return [];
+
+  const decoded = records(raw).map((record) => ({ record, frame: tryDecodeFrame(record.text || "") }));
+  const offers = new Map();
+  for (const item of decoded) {
+    const { record, frame } = item;
+    if (frame?.type !== "offer" || !targets.has(frame.from) || frame.role !== "payer") continue;
+    if (frame.asset !== "PAPER" || frame.lock !== "hash" || !frame.rails?.includes("paper")) continue;
+    if (record.from !== frame.from || !(await validTransportSignature(record, OFFER_ROOM))) continue;
+    offers.set(frame.id, item);
+  }
+
+  const accepted = new Map();
+  for (const item of decoded) {
+    const { record, frame } = item;
+    const offerItem = offers.get(frame?.ref);
+    if (frame?.type !== "accept" || !offerItem || frame.from === offerItem.frame.from || accepted.has(frame.ref)) continue;
+    if (record.from !== frame.from || !(await validTransportSignature(record, OFFER_ROOM))) continue;
+    const at = recordTime(record, now);
+    if (!applyFrame(openContract(offerItem.frame), frame, at).ok) continue;
+    accepted.set(frame.ref, {
+      payerDid: offerItem.frame.from,
+      offer: offerItem.frame,
+      offerSeq: offerItem.record.seq ?? null,
+      accept: frame,
+      acceptSeq: record.seq ?? null,
+      room: dealRoom(frame.contract),
+    });
+  }
+
+  const counts = new Map();
+  return [...accepted.values()]
+    .sort((left, right) => Number(right.acceptSeq || 0) - Number(left.acceptSeq || 0))
+    .filter((deal) => {
+      const count = counts.get(deal.payerDid) || 0;
+      if (count >= limitPerPayer) return false;
+      counts.set(deal.payerDid, count + 1);
+      return true;
+    });
+}
+
 export async function summarizeDealActivity(raw, offer, accept, now = Date.now()) {
   const folded = await foldPayeeDeal(raw, offer, accept, now);
   const seqs = {};

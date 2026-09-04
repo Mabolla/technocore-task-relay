@@ -214,6 +214,16 @@ test("queues up to three accepted payee jobs without overwriting their secrets",
   assert.match(source, /PARK ACTIVE DEAL & ARM AUTO-JOB HUNTER/);
 });
 
+test("prioritizes payers with globally verified lock history without excluding unknown payers", () => {
+  assert.match(source, /PAYER_LOCK_PRIORITY_KEY/);
+  assert.match(source, /listRecentAcceptedPayerDeals/);
+  assert.match(source, /summary\.seqs\.lock != null/);
+  assert.match(source, /prioritizePaperOffers/);
+  assert.match(source, /preferredAvailable && !hasVerifiedPayerLock/);
+  assert.match(source, /setTimeout\(resolve, 75\)/);
+  assert.match(source, /Reputation is optional; the existing hunter remains the fallback/);
+});
+
 test("only discards a payee deal after confirming its accept is absent", () => {
   assert.match(source, /DISCARD UNCONFIRMED DEAL/);
   assert.match(source, /verifyAcceptRecord\(await readOfferHistory\(\), deal\.offer, deal\.accept\)/);

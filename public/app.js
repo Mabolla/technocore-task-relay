@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord } from "./tclk-official.js?v=delivery-gate-1";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord } from "./tclk-official.js?v=payer-lock-priority-1";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -14,6 +14,7 @@ const PAYEE_DEAL_KEY = "mabolla.task-relay.tclk-payee-deal.v1";
 const PAYEE_DEALS_KEY = "mabolla.task-relay.tclk-payee-deals.v1";
 const PAYEE_AUTO_ACCEPT_KEY = "mabolla.task-relay.payee-auto-accept.v1";
 const PAYEE_AUTO_HUNTER_KEY = "mabolla.task-relay.payee-auto-hunter.v1";
+const PAYER_LOCK_PRIORITY_KEY = "mabolla.task-relay.payer-lock-priority.v1";
 const MAX_ACTIVE_PAYEE_DEALS = 3;
 const TRACK_RECORD_KEY = "mabolla.task-relay.tclk-track-record.v1";
 const CREATOR_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
@@ -109,11 +110,63 @@ const readPayerAutoSettle = () => { try { return JSON.parse(localStorage.getItem
 const readPayeeDeals = () => { try { return JSON.parse(localStorage.getItem(PAYEE_DEALS_KEY)) || {}; } catch { return {}; } };
 const readPayeeAutoAccept = () => { try { return JSON.parse(localStorage.getItem(PAYEE_AUTO_ACCEPT_KEY)) || { armed: false }; } catch { return { armed: false }; } };
 const readPayeeAutoHunter = () => { try { return JSON.parse(localStorage.getItem(PAYEE_AUTO_HUNTER_KEY)) || { armed: false }; } catch { return { armed: false }; } };
+const readPayerLockPriority = () => { try { return JSON.parse(localStorage.getItem(PAYER_LOCK_PRIORITY_KEY)) || {}; } catch { return {}; } };
 let payerAutopilotRunning = false;
 let payerAutoSettleRunning = false;
 let payeeAutoAcceptRunning = false;
 let payeeAutoHunterRunning = false;
 let payeeAutoHunterVaultPassword = null;
+const payerLockPriorityChecks = new Set();
+
+function hasVerifiedPayerLock(did) {
+  return Number(readPayerLockPriority()[did]?.verifiedLocks || 0) > 0;
+}
+
+function savePayerLockPriority(did, verifiedLocks, checkedAt = new Date().toISOString()) {
+  if (!/^did:key:z6Mk/.test(did)) return;
+  const history = readPayerLockPriority();
+  const previous = history[did] || {};
+  history[did] = {
+    checkedAt,
+    verifiedLocks: Math.max(Number(previous.verifiedLocks || 0), Number(verifiedLocks || 0)),
+  };
+  localStorage.setItem(PAYER_LOCK_PRIORITY_KEY, JSON.stringify(history));
+}
+
+function prioritizePaperOffers(offers) {
+  return [...offers].sort((left, right) => {
+    const priority = Number(hasVerifiedPayerLock(right.offer.from)) - Number(hasVerifiedPayerLock(left.offer.from));
+    return priority || Number(right.seq || 0) - Number(left.seq || 0);
+  });
+}
+
+async function refreshPayerLockPriority(candidates) {
+  const history = readPayerLockPriority();
+  const freshAfter = Date.now() - 6 * 60 * 60_000;
+  const payerDids = [...new Set(candidates.map((candidate) => candidate?.offer?.from).filter(Boolean))]
+    .filter((did) => Date.parse(history[did]?.checkedAt || 0) < freshAfter && !payerLockPriorityChecks.has(did))
+    .slice(0, 4);
+  if (!payerDids.length) return;
+  payerDids.forEach((did) => payerLockPriorityChecks.add(did));
+  try {
+    const deals = await listRecentAcceptedPayerDeals(await readOfferHistory(), payerDids, Date.now(), 3);
+    await Promise.all(payerDids.map(async (did) => {
+      let verifiedLocks = 0;
+      for (const deal of deals.filter((candidate) => candidate.payerDid === did)) {
+        try {
+          const response = await fetch(`https://technocore.chat/r/${deal.room}?limit=200&format=json&n=${Date.now()}`, {
+            headers: { accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(4_000),
+          });
+          if (!response.ok) continue;
+          const summary = await summarizeDealActivity(await response.json(), deal.offer, deal.accept);
+          if (summary.seqs.lock != null) { verifiedLocks = 1; break; }
+        } catch { /* A failed history lookup never blocks or penalizes a current offer. */ }
+      }
+      savePayerLockPriority(did, verifiedLocks);
+    }));
+  } catch { /* Reputation is optional; the existing hunter remains the fallback. */ }
+  finally { payerDids.forEach((did) => payerLockPriorityChecks.delete(did)); }
+}
 
 function rememberPayeeDeal(deal) {
   const contract = deal?.accept?.contract;
@@ -690,9 +743,10 @@ async function tryAutoHuntFromPayload(payload) {
   savePayeeAutoHunter(state);
   const minimumFinishMs = state.minFinishMinutes * 60_000;
   const knownOfferIds = new Set(Object.values(readPayeeDeals()).map((deal) => deal?.offer?.id).filter(Boolean));
-  const safe = (await listSafePaperOffers(payload, identity.did, Date.now(), minimumFinishMs))
-    .filter((candidate) => !knownOfferIds.has(candidate.offer.id))
+  const safe = prioritizePaperOffers((await listSafePaperOffers(payload, identity.did, Date.now(), minimumFinishMs))
+    .filter((candidate) => !knownOfferIds.has(candidate.offer.id)))
     .slice(0, 8);
+  void refreshPayerLockPriority(safe);
   const candidate = await verifyFirstPaperOffer(safe);
   if (!candidate) {
     state.status = "No eligible offer yet · still watching";
@@ -1586,6 +1640,7 @@ async function verifyPaperOffers(offers) {
 
 async function verifyFirstPaperOffer(offers) {
   if (!offers.length) return null;
+  const preferredAvailable = offers.some((candidate) => hasVerifiedPayerLock(candidate.offer.from));
   try {
     return await Promise.any(offers.map(async (candidate) => {
       const specResponse = await fetch(freshContextUrl(candidate.offer.job.context), {
@@ -1595,6 +1650,9 @@ async function verifyFirstPaperOffer(offers) {
       if (!specResponse.ok) throw new Error("Job note unavailable");
       const spec = await reviewJobSpec(await specResponse.text(), candidate.offer);
       if (!spec) throw new Error("Job note failed verification");
+      if (preferredAvailable && !hasVerifiedPayerLock(candidate.offer.from)) {
+        await new Promise((resolve) => setTimeout(resolve, 75));
+      }
       return { ...candidate, spec };
     }));
   } catch {
@@ -1614,7 +1672,9 @@ $("#scan-offers").addEventListener("click", async () => {
       notice("Fast scan found none; full retained-history scan running");
       verified = await verifyPaperOffers(await listSafePaperOffers(await readOfferHistory(), identity.did));
     }
-    renderPayeeOffers(verified); notice(`${verified.length} signed, unexpired actionable PAPER job${verified.length === 1 ? "" : "s"} found`);
+    renderPayeeOffers(verified);
+    void refreshPayerLockPriority(verified);
+    notice(`${verified.length} signed, unexpired actionable PAPER job${verified.length === 1 ? "" : "s"} found`);
   } catch (error) {
     const message = error?.name === "TimeoutError"
       ? "Scan timed out while reading Technocore. No job was accepted; try again."
