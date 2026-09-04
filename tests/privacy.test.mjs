@@ -155,6 +155,9 @@ test("auto-accepts only an explicitly armed offer after a verified room reservat
   assert.match(source, /message\.from === "server"/);
   assert.match(source, /\^created\\s\+\\S\+/);
   assert.match(source, /SLOT LOST AT EVENT/);
+  assert.match(source, /wait=2&format=json/);
+  assert.match(source, /created\?\.seq \?\? "PROACTIVE"/);
+  assert.match(source, /Date\.now\(\) - lastOfferCheck >= 5_000/);
   assert.match(source, /inspectPayeeReservation/);
   assert.match(source, /recheckAutoAcceptOffer/);
   assert.match(source, /signedUrl\(deal\.room/);
