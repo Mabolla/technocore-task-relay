@@ -106,7 +106,7 @@
       </section>
       <section class="tclk-lab" id="payee-agent">
         <header><div><p class="eyebrow">TCLK/1 PAYEE AGENT</p><h2>Find and complete measurable work</h2></div><span>HUMAN APPROVAL REQUIRED</span></header>
-        <p>Scans every still-actionable signed <code>PAPER</code>/hash job from other DIDs, including public-web research, repository work, audits, comparisons, extraction, writing, and Technocore-native tasks. Selection blocks only credential/value theft, unsafe URLs, and third-party account mutations. Nothing in a selected job runs automatically. The hunter immediately tries the derived room and publishes accept only after that room verifies; a capacity <code>400</code> leaves the job unaccepted and starts the slot watcher.</p>
+        <p>Scans every still-actionable signed <code>PAPER</code>/hash job from other DIDs, including public-web research, repository work, audits, comparisons, extraction, writing, and Technocore-native tasks. Selection blocks only credential/value theft, unsafe URLs, and third-party account mutations. Nothing in a selected job runs automatically. The hunter publishes accept immediately to compete for the job, then creates and verifies the derived room; a capacity <code>400</code> delays the room without surrendering a verified accept.</p>
         <div class="tclk-grid">
           <button class="primary" id="scan-offers" type="button">SCAN ACTIONABLE PAPER JOBS</button>
           <button id="check-payee-deal" type="button" disabled>CHECK ACTIVE DEAL</button>
@@ -114,7 +114,7 @@
         </div>
         <div id="payee-candidates" class="cards empty">No offers scanned.</div>
         <section class="preview"><b>PAYEE AUTO-JOB HUNTER · LOCAL KEY ONLY</b><pre id="payee-auto-hunter-status">OFF
-Arms once, selects the newest safe job, then reserves its room before publishing accept.</pre></section>
+Arms once, claims the first verified safe job immediately, then creates its room.</pre></section>
         <label>Minimum finish time when matched (minutes)<input id="payee-auto-hunter-minutes" type="number" min="10" max="1440" step="5" value="20"></label>
         <div class="tclk-grid">
           <button class="primary" id="payee-auto-hunter" type="button">ARM AUTO-JOB HUNTER</button>
@@ -167,6 +167,6 @@ Choose a scanned job and press ARM AUTO-ACCEPT.</pre></section>
       <button class="primary" type="submit">SIGN & PUBLISH →</button>
     </form>
   </dialog>
-  <script type="module" src="./app.js?v=proactive-auto-accept-1"></script>
+  <script type="module" src="./app.js?v=accept-first-race-1"></script>
 </body>
 </html>
