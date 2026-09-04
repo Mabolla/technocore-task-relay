@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeAccept, generateHashLock, makeOffer, verifySecret } from "@flop-labs/tclk";
-import { JOB_TEMPLATES, OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, makeSimpleVerificationOffer, reviewJobSpec, summarizeDealActivity, verifyBoundJobSpec, verifyExactSignedTextRecord } from "../src/tclk-browser-entry.mjs";
+import { JOB_TEMPLATES, OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, makeSimpleVerificationOffer, reviewJobSpec, summarizeDealActivity, verifyBoundJobSpec, verifyExactSignedTextRecord } from "../src/tclk-browser-entry.mjs";
 
 const payer = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -57,6 +57,13 @@ test("auto-settle accepts only a signed delivery that passes a supported determi
   assert.match(evaluateObjectiveDelivery(job, passing.replace(hash, "b".repeat(64)), prepared.offer).reason, /hash is missing/);
   assert.match(evaluateObjectiveDelivery(job, passing.replace("PASS", "FAIL"), prepared.offer).reason, /failed check/);
   assert.match(evaluateObjectiveDelivery("Custom legacy task", passing, prepared.offer).reason, /no supported deterministic validator/);
+});
+
+test("payer track success requires its own verified terminal receipt", () => {
+  const payerEntry = { role: "payer", status: "claimed", deliveryVerified: true, seqs: { receipt: 4 } };
+  assert.equal(isSuccessfulTrackEntry(payerEntry), false);
+  assert.equal(isSuccessfulTrackEntry({ ...payerEntry, payerReceiptVerified: true, payerReceiptSeq: 5 }), true);
+  assert.equal(isSuccessfulTrackEntry({ role: "payee", status: "claimed", deliveryVerified: true, seqs: { receipt: 4 } }), true);
 });
 
 test("lists only non-frame delivery text signed by the accepted payee", async () => {

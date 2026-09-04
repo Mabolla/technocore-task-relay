@@ -108,10 +108,12 @@ test("renders a verified tclk track record with lifecycle sequence numbers", () 
   assert.match(source, /summarizeDealActivity/);
   assert.match(source, /TRACK_RECORD_KEY/);
   assert.match(source, /\["offer", "OFFER"\]/);
-  assert.match(source, /\["receipt", "RECEIPT"\]/);
+  assert.match(source, /\["receipt", receiptLabel\]/);
   assert.match(source, /SUCCESSFUL · DELIVERY VERIFIED/);
   assert.match(source, /CLAIMED · RECEIPT PRESENT · NO DELIVERY/);
-  assert.match(source, /entry\.payerReceiptVerified \|\| evaluation\.ok \|\| manuallyApproved/);
+  assert.match(source, /isSuccessfulTrackEntry/);
+  assert.match(source, /PAYER RECEIPT PENDING/);
+  assert.match(source, /PAYER RECEIPT/);
   assert.match(source, /archiveCompletedPayeeDeal/);
   assert.match(source, /COMPLETED DEAL ARCHIVED · RECEIPT/);
   assert.match(source, /successfulTrackEntry/);

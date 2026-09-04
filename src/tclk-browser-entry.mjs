@@ -447,6 +447,12 @@ export function evaluateObjectiveDelivery(jobText, deliveryText, offer) {
   return { ok: true, reason: "Hard template checks passed" };
 }
 
+export function isSuccessfulTrackEntry(entry) {
+  if (entry?.status !== "claimed" || entry.deliveryVerified !== true) return false;
+  if (entry.role === "payer") return entry.payerReceiptVerified === true;
+  return Boolean(entry.seqs?.receipt);
+}
+
 export function expectedPaperLock(offer, accept) {
   const note = paperNote(accept.contract);
   return { note, ref: accept.contract, value: `tclkpaper1 locked ${offer.lock} ${accept.statement} ${offer.refundAfterMs}` };

@@ -3583,6 +3583,11 @@ function evaluateObjectiveDelivery(jobText, deliveryText, offer) {
   if (!/[\"']?overall[\"']?\s*[:=]\s*(?:true|[\"']PASS[\"'])/i.test(delivery)) return { ok: false, reason: "Overall result is not PASS/true" };
   return { ok: true, reason: "Hard template checks passed" };
 }
+function isSuccessfulTrackEntry(entry) {
+  if (entry?.status !== "claimed" || entry.deliveryVerified !== true) return false;
+  if (entry.role === "payer") return entry.payerReceiptVerified === true;
+  return Boolean(entry.seqs?.receipt);
+}
 function expectedPaperLock(offer, accept) {
   const note = paperNote(accept.contract);
   return { note, ref: accept.contract, value: `tclkpaper1 locked ${offer.lock} ${accept.statement} ${offer.refundAfterMs}` };
@@ -3655,6 +3660,7 @@ export {
   expectedPaperRefund,
   findValidAccept,
   foldPayeeDeal,
+  isSuccessfulTrackEntry,
   listMyPaperActivity,
   listRecentAcceptedPayerDeals,
   listSafePaperOffers,

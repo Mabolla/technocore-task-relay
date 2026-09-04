@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord, verifyExactSignedTextRecord } from "./tclk-official.js?v=validator-signature-evidence-2";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord, verifyExactSignedTextRecord } from "./tclk-official.js?v=payer-receipt-track-3";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -2009,13 +2009,14 @@ function jobSummary(entry) {
 }
 
 function successfulTrackEntry(entry) {
-  return entry.status === "claimed" && Boolean(entry.seqs?.receipt) && entry.deliveryVerified === true;
+  return isSuccessfulTrackEntry(entry);
 }
 
 function statusLabel(entry) {
   if (successfulTrackEntry(entry)) return "SUCCESSFUL · DELIVERY VERIFIED";
   if (entry.noDeliveryRejected) return "CLAIMED · NO DELIVERY · REJECTED";
   if (entry.deliveryRejected) return "CLAIMED · DELIVERY REJECTED";
+  if (entry.role === "payer" && entry.status === "claimed" && entry.deliveryVerified === true && !entry.payerReceiptVerified) return "CLAIMED · DELIVERY VERIFIED · PAYER RECEIPT PENDING";
   if (entry.status === "claimed" && entry.seqs?.receipt && entry.deliverySeq == null) return "CLAIMED · RECEIPT PRESENT · NO DELIVERY";
   if (entry.status === "claimed" && entry.seqs?.receipt) return "CLAIMED · DELIVERY UNVERIFIED";
   if (entry.status === "claimed") return "CLAIMED · RECEIPT PENDING";
@@ -2065,8 +2066,13 @@ function renderTrackRecord() {
     const contract = document.createElement("code"); contract.textContent = entry.contract ? `${entry.contract.slice(0, 12)}…${entry.contract.slice(-6)}` : entry.offer.id.slice(0, 18) + "…";
     job.append(summary, contract);
     const chain = document.createElement("td");
-    const seqOrder = [["offer", "OFFER"], ["accept", "ACCEPT"], ["lock", "LOCK"], ["reveal", "REVEAL"], ["refund", "REFUND"], ["cancel", "CANCEL"], ["receipt", "RECEIPT"], ["review", "REVIEW"]];
-    const parts = seqOrder.filter(([type]) => entry.seqs?.[type] != null).map(([type, label]) => `${label} #${entry.seqs[type]}`);
+    const receiptLabel = entry.role === "payer"
+      ? String(entry.payerReceiptSeq) === String(entry.seqs?.receipt) ? "PAYER RECEIPT" : "PAYEE RECEIPT"
+      : "RECEIPT";
+    const seqOrder = [["offer", "OFFER"], ["accept", "ACCEPT"], ["lock", "LOCK"], ["delivery", "DELIVERY"], ["reveal", "REVEAL"], ["refund", "REFUND"], ["cancel", "CANCEL"], ["receipt", receiptLabel], ["review", "REVIEW"]];
+    const seqs = { ...entry.seqs, delivery: entry.deliverySeq };
+    const parts = seqOrder.filter(([type]) => seqs?.[type] != null).map(([type, label]) => `${label} #${seqs[type]}`);
+    if (entry.role === "payer" && entry.payerReceiptSeq != null && String(entry.payerReceiptSeq) !== String(entry.seqs?.receipt)) parts.push(`PAYER RECEIPT #${entry.payerReceiptSeq}`);
     chain.textContent = parts.length ? parts.join(" → ") : "No verified seq";
     const status = document.createElement("td");
     const label = document.createElement("div"); label.textContent = statusLabel(entry); status.append(label);
