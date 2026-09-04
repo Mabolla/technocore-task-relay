@@ -186,11 +186,27 @@ test("hunts one new safe job and hands it to accept-first auto-accept", () => {
   assert.match(source, /VERIFY STALE DEAL & ARM AUTO-JOB HUNTER/);
   assert.match(source, /VERIFIED UNACCEPTED STALE CANDIDATE CLEARED/);
   assert.match(source, /Hunter not armed — the previous accept exists at seq/);
-  assert.match(source, /ARMING · READING CURRENT SIGNED OFFERS/);
+  assert.match(source, /ARMING ·.*JOBS SECURED · READING CURRENT OFFERS/);
   assert.match(source, /AbortSignal\.timeout\(15_000\)/);
   assert.match(source, /STOPPED AFTER REFRESH · ARM AGAIN BECAUSE THE VAULT PASSWORD IS NEVER STORED/);
   assert.match(source, /publishing accept immediately/);
   assert.doesNotMatch(source, /localStorage\.setItem\(PAYEE_AUTO_HUNTER_KEY[^\n]*payeeAutoHunterVaultPassword/);
+});
+
+test("queues up to three accepted payee jobs without overwriting their secrets", () => {
+  assert.match(source, /PAYEE_DEALS_KEY/);
+  assert.match(source, /MAX_ACTIVE_PAYEE_DEALS = 3/);
+  assert.match(source, /rememberPayeeDeal\(deal\)/);
+  assert.match(source, /activePayeeDeals\(\)/);
+  assert.match(source, /queuedPayeeDeals\(\)/);
+  assert.match(source, /DEADLINE PASSED · NO LOCAL LOCK/);
+  assert.match(source, /continueHunterAfterQueuedDeal/);
+  assert.match(source, /JOBS SECURED · WATCHING NEXT OFFERS/);
+  assert.match(source, /tryAutoHuntFromPayload\(tail\)/);
+  assert.match(source, /knownOfferIds/);
+  assert.match(source, /PAYEE DEAL QUEUE · MAX 3/);
+  assert.match(source, /OPEN \/ CHECK →/);
+  assert.match(source, /Offer #\$\{existing\.offerSeq \?\? "\?"\} parked safely in the payee queue/);
 });
 
 test("only discards a payee deal after confirming its accept is absent", () => {
