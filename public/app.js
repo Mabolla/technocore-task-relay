@@ -233,7 +233,7 @@ async function runPayerAutopilot() {
   try {
     while (readPayerAutopilot().armed) {
       const state = readPayerAutopilot();
-      const response = await fetch(`https://technocore.chat/r/events?since=${state.cursor}&wait=10&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+      const response = await fetch(`https://technocore.chat/r/events?since=${state.cursor}&wait=2&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
       if (!response.ok) throw new Error(`Event stream failed (${response.status})`);
       const payload = await response.json();
       const messages = Array.isArray(payload.messages) ? payload.messages : [];
@@ -257,7 +257,7 @@ async function runPayerAutopilot() {
         renderPayerDeal();
       }
       renderPayerAutopilot();
-      await new Promise((resolve) => setTimeout(resolve, 750));
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
     }
   } catch (error) {
     const state = readPayerAutopilot();
@@ -373,9 +373,14 @@ async function tryAutoAcceptPayeeDeal(deal, eventSeq) {
     await resolveUnacceptedHunterMiss(deal, "auto-accept-expired", "OFFER EXPIRED BEFORE A ROOM SLOT");
     return false;
   }
-  if (deal.state !== "accept-pending" && !await recheckAutoAcceptOffer(deal, identity)) {
-    await resolveUnacceptedHunterMiss(deal, "auto-accept-unavailable", "OFFER IS NO LONGER AVAILABLE");
-    return false;
+  const lastOfferCheck = Date.parse(deal.offerCheckedAt || "");
+  if (deal.state !== "accept-pending" && (!Number.isFinite(lastOfferCheck) || Date.now() - lastOfferCheck >= 5_000)) {
+    if (!await recheckAutoAcceptOffer(deal, identity)) {
+      await resolveUnacceptedHunterMiss(deal, "auto-accept-unavailable", "OFFER IS NO LONGER AVAILABLE");
+      return false;
+    }
+    deal.offerCheckedAt = new Date().toISOString();
+    savePayeeDeal(deal);
   }
 
   let reserved = await inspectPayeeReservation(deal);
@@ -468,7 +473,7 @@ async function runPayeeAutoAccept() {
       state.lastPollAt = new Date().toISOString();
       localStorage.setItem(PAYEE_AUTO_ACCEPT_KEY, JSON.stringify(state));
       const created = messages.find((message) => message.from === "server" && /^created\s+\S+/.test(String(message.text || "")));
-      if (created || deal.state === "accept-pending") await tryAutoAcceptPayeeDeal(deal, created?.seq ?? "VERIFY");
+      await tryAutoAcceptPayeeDeal(deal, created?.seq ?? "PROACTIVE");
       renderPayeeAutoAccept();
       await new Promise((resolve) => setTimeout(resolve, 750));
     }
@@ -479,7 +484,7 @@ async function runPayeeAutoAccept() {
     localStorage.setItem(PAYEE_AUTO_ACCEPT_KEY, JSON.stringify(state));
     const deal = readPayeeDeal();
     if (deal) { deal.autoAcceptStatus = `TEMPORARY ERROR · ${error.message} · RETRYING`; savePayeeDeal(deal); }
-    setTimeout(() => { payeeAutoAcceptRunning = false; void runPayeeAutoAccept(); }, 10_000);
+    setTimeout(() => { payeeAutoAcceptRunning = false; void runPayeeAutoAccept(); }, 3_000);
     return;
   } finally {
     if (!readPayeeAutoAccept().armed) payeeAutoAcceptRunning = false;
