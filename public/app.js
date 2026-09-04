@@ -11,8 +11,10 @@ const TCLK_PAYER_DEALS_KEY = "mabolla.task-relay.tclk-payer-deals.v1";
 const PAYER_AUTOPILOT_KEY = "mabolla.task-relay.payer-autopilot.v1";
 const PAYER_AUTO_SETTLE_KEY = "mabolla.task-relay.payer-auto-settle.v1";
 const PAYEE_DEAL_KEY = "mabolla.task-relay.tclk-payee-deal.v1";
+const PAYEE_DEALS_KEY = "mabolla.task-relay.tclk-payee-deals.v1";
 const PAYEE_AUTO_ACCEPT_KEY = "mabolla.task-relay.payee-auto-accept.v1";
 const PAYEE_AUTO_HUNTER_KEY = "mabolla.task-relay.payee-auto-hunter.v1";
+const MAX_ACTIVE_PAYEE_DEALS = 3;
 const TRACK_RECORD_KEY = "mabolla.task-relay.tclk-track-record.v1";
 const CREATOR_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -104,6 +106,7 @@ const readPayerDeal = () => { try { return JSON.parse(localStorage.getItem(TCLK_
 const readPayerDeals = () => { try { return JSON.parse(localStorage.getItem(TCLK_PAYER_DEALS_KEY)) || {}; } catch { return {}; } };
 const readPayerAutopilot = () => { try { return JSON.parse(localStorage.getItem(PAYER_AUTOPILOT_KEY)) || { armed: false }; } catch { return { armed: false }; } };
 const readPayerAutoSettle = () => { try { return JSON.parse(localStorage.getItem(PAYER_AUTO_SETTLE_KEY)) || { armed: false }; } catch { return { armed: false }; } };
+const readPayeeDeals = () => { try { return JSON.parse(localStorage.getItem(PAYEE_DEALS_KEY)) || {}; } catch { return {}; } };
 const readPayeeAutoAccept = () => { try { return JSON.parse(localStorage.getItem(PAYEE_AUTO_ACCEPT_KEY)) || { armed: false }; } catch { return { armed: false }; } };
 const readPayeeAutoHunter = () => { try { return JSON.parse(localStorage.getItem(PAYEE_AUTO_HUNTER_KEY)) || { armed: false }; } catch { return { armed: false }; } };
 let payerAutopilotRunning = false;
@@ -111,6 +114,32 @@ let payerAutoSettleRunning = false;
 let payeeAutoAcceptRunning = false;
 let payeeAutoHunterRunning = false;
 let payeeAutoHunterVaultPassword = null;
+
+function rememberPayeeDeal(deal) {
+  const contract = deal?.accept?.contract;
+  if (!contract) return;
+  const deals = readPayeeDeals();
+  deals[contract] = deal;
+  localStorage.setItem(PAYEE_DEALS_KEY, JSON.stringify(deals));
+}
+
+function forgetPayeeDeal(contract) {
+  if (!contract) return;
+  const deals = readPayeeDeals();
+  delete deals[contract];
+  localStorage.setItem(PAYEE_DEALS_KEY, JSON.stringify(deals));
+}
+
+function queuedPayeeDeals() {
+  return Object.values(readPayeeDeals()).filter((deal) => deal?.accept?.contract && deal.acceptSeq && !["claimed", "refunded", "abandoned"].includes(deal.state));
+}
+
+function activePayeeDeals() {
+  return queuedPayeeDeals().filter((deal) => !(
+    ["accepted", "accepted-room-pending"].includes(deal.state)
+    && Date.now() >= Number(deal.offer?.claimByMs || 0)
+  ));
+}
 
 function rememberPayerDeal(deal) {
   const contract = deal?.accept?.contract;
@@ -288,7 +317,49 @@ function renderPayeeAutoAccept() {
 
 function savePayeeDeal(deal) {
   localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
+  rememberPayeeDeal(deal);
   renderPayeeAutoAccept();
+  renderPayeeDealQueue();
+}
+
+function payeeQueueLabel(deal) {
+  if (["accepted", "accepted-room-pending"].includes(deal.state) && Date.now() >= Number(deal.offer?.claimByMs || 0)) return "DEADLINE PASSED · NO LOCAL LOCK";
+  if (deal.state === "locked") return "LOCKED · READY TO WORK";
+  if (deal.state === "accepted") return deal.lockValid ? "LOCKED · READY TO WORK" : "ACCEPTED · WAITING FOR LOCK";
+  if (deal.state === "accepted-room-pending") return "ACCEPTED · WAITING FOR ROOM";
+  if (deal.state === "claim-pending") return "REVEAL PUBLISHED · CHECK RESULT";
+  return String(deal.state || "SAVED").toUpperCase();
+}
+
+function renderPayeeDealQueue() {
+  const root = $("#payee-deal-queue");
+  if (!root) return;
+  const currentContract = readPayeeDeal()?.accept?.contract;
+  const deals = queuedPayeeDeals().sort((left, right) => Number(left.offerSeq || 0) - Number(right.offerSeq || 0));
+  root.classList.toggle("empty", !deals.length);
+  if (!deals.length) {
+    root.replaceChildren(document.createTextNode("No accepted payee jobs in the local queue."));
+    return;
+  }
+  root.replaceChildren(...deals.map((deal) => {
+    const row = document.createElement("article"); row.className = "mission";
+    const title = document.createElement("b"); title.textContent = `OFFER #${deal.offerSeq ?? "?"} · ${payeeQueueLabel(deal)}`;
+    const detail = document.createElement("code"); detail.textContent = `${deal.accept.contract.slice(0, 18)}… · /r/${deal.room}`;
+    const select = document.createElement("button");
+    select.textContent = currentContract === deal.accept.contract ? "SELECTED" : "OPEN / CHECK →";
+    select.disabled = currentContract === deal.accept.contract;
+    select.addEventListener("click", () => {
+      if (readPayeeAutoAccept().armed || readPayeeAutoHunter().armed) { notice("Stop the hunter before opening a queued deal for work"); return; }
+      savePayeeDeal(deal);
+      $("#check-payee-deal").disabled = false;
+      $("#discard-payee-deal").disabled = true;
+      $("#payee-status").textContent = `QUEUED PAYEE DEAL SELECTED\nOffer #${deal.offerSeq ?? "?"}\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.room}\nPress CHECK ACTIVE DEAL.`;
+      renderPayeeDealQueue();
+      notice(`Offer #${deal.offerSeq ?? "?"} selected from the payee queue`);
+    });
+    row.append(title, detail, select);
+    return row;
+  }));
 }
 
 function stopPayeeAutoAccept(reason, deal = readPayeeDeal()) {
@@ -328,16 +399,11 @@ async function recheckAutoAcceptOffer(deal, identity) {
 async function resolveUnacceptedHunterMiss(deal, state, reason) {
   const accepted = await verifyAcceptRecord(await readOfferHistory(), deal.offer, deal.accept);
   if (accepted) {
-    deal.state = "accepted";
+    deal.state = "accepted-room-pending";
     deal.acceptSeq = accepted.seq;
-    deal.autoAcceptStatus = `ACCEPT VERIFIED DURING RECOVERY · seq #${accepted.seq ?? "?"}`;
+    deal.autoAcceptStatus = `ACCEPT VERIFIED DURING RECOVERY · seq #${accepted.seq ?? "?"} · CREATING DEAL ROOM`;
     savePayeeDeal(deal);
-    stopPayeeAutoAccept(deal.autoAcceptStatus, deal);
-    payeeAutoHunterVaultPassword = null;
-    $("#check-payee-deal").disabled = false;
-    $("#discard-payee-deal").disabled = true;
-    $("#payee-status").textContent = `AUTO-ACCEPT VERIFIED · seq #${accepted.seq ?? "?"}\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.room}\nNEXT: Wait for the payer's signed lock, then press CHECK ACTIVE DEAL.`;
-    notifyPayeeAutoAccept("Technocore job accepted", `Offer #${deal.offerSeq ?? "?"} is verified. Wait for the payer lock.`);
+    notifyPayeeAutoAccept("Technocore job secured", `Offer #${deal.offerSeq ?? "?"} is verified; creating its deal room.`);
     return "accepted";
   }
 
@@ -351,6 +417,7 @@ async function resolveUnacceptedHunterMiss(deal, state, reason) {
   const cursor = Number(tail.last_seq || tail.messages?.at(-1)?.seq || 0);
   const hunter = readPayeeAutoHunter();
   stopPayeeAutoAccept(reason, deal);
+  forgetPayeeDeal(deal.accept.contract);
   localStorage.removeItem(PAYEE_DEAL_KEY);
   resetPayeeUi();
   savePayeeAutoHunter({
@@ -366,12 +433,48 @@ async function resolveUnacceptedHunterMiss(deal, state, reason) {
   return "resumed";
 }
 
+async function continueHunterAfterQueuedDeal(deal) {
+  if (deal.selectedBy !== "auto-job-hunter" || !payeeAutoHunterVaultPassword) return false;
+  localStorage.removeItem(PAYEE_DEAL_KEY);
+  resetPayeeUi();
+  renderPayeeDealQueue();
+  const count = activePayeeDeals().length;
+  if (count >= MAX_ACTIVE_PAYEE_DEALS) {
+    stopPayeeAutoHunter(`QUEUE FULL · ${count}/${MAX_ACTIVE_PAYEE_DEALS} ACCEPTED JOBS`);
+    notifyPayeeAutoAccept("Payee queue full", `${count} accepted jobs are saved; complete or archive one before hunting again.`);
+    return true;
+  }
+  const tail = await readOfferTail();
+  const cursor = Number(tail.last_seq || tail.messages?.at(-1)?.seq || 0);
+  savePayeeAutoHunter({
+    ...readPayeeAutoHunter(),
+    armed: true,
+    cursor,
+    reason: "",
+    status: `${count}/${MAX_ACTIVE_PAYEE_DEALS} JOBS SECURED · WATCHING NEXT OFFERS`,
+    resumedAt: new Date().toISOString(),
+  });
+  notifyPayeeAutoAccept("Technocore job hunter resumed", `Offer #${deal.offerSeq ?? "?"} is queued; watching for another job.`);
+  setTimeout(() => {
+    payeeAutoHunterRunning = false;
+    void tryAutoHuntFromPayload(tail)
+      .then((matched) => { if (!matched) void runPayeeAutoHunter(); })
+      .catch((error) => {
+        const state = readPayeeAutoHunter();
+        savePayeeAutoHunter({ ...state, status: `TEMPORARY ERROR · ${error.message} · RETRYING` });
+        setTimeout(() => void runPayeeAutoHunter(), 1_000);
+      });
+  }, 0);
+  return true;
+}
+
 async function tryAutoAcceptPayeeDeal(deal, eventSeq) {
   const identity = readIdentity();
   if (!identity || identity.did !== deal.accept.from) throw new Error("Local DID does not match the prepared payee accept");
   if (Date.now() >= deal.offer.expiresMs || Date.now() >= deal.offer.claimByMs) {
     if (deal.acceptSeq) {
       stopPayeeAutoAccept(`ACCEPT #${deal.acceptSeq} VERIFIED · DEAL-ROOM DEADLINE PASSED`, deal);
+      await continueHunterAfterQueuedDeal(deal);
       return false;
     }
     await resolveUnacceptedHunterMiss(deal, "auto-accept-expired", "OFFER EXPIRED BEFORE ACCEPT");
@@ -408,7 +511,6 @@ async function tryAutoAcceptPayeeDeal(deal, eventSeq) {
     deal.state = "accepted-room-pending";
     deal.autoAcceptStatus = `ACCEPT VERIFIED · seq #${accepted.seq ?? "?"} · CLAIM SECURED · CREATING DEAL ROOM`;
     savePayeeDeal(deal);
-    payeeAutoHunterVaultPassword = null;
     notifyPayeeAutoAccept("Technocore job secured", `Offer #${deal.offerSeq ?? "?"} was accepted at seq #${accepted.seq ?? "?"}; creating its deal room.`);
   }
 
@@ -453,11 +555,11 @@ async function tryAutoAcceptPayeeDeal(deal, eventSeq) {
   deal.autoAcceptStatus = `ACCEPT VERIFIED · seq #${accepted.seq ?? "?"} · ROOM RESERVED #${reserved.seq ?? "?"}`;
   savePayeeDeal(deal);
   stopPayeeAutoAccept(deal.autoAcceptStatus, deal);
-  payeeAutoHunterVaultPassword = null;
   $("#check-payee-deal").disabled = false;
   $("#discard-payee-deal").disabled = true;
   $("#payee-status").textContent = `AUTO-ACCEPT VERIFIED · seq #${accepted.seq ?? "?"}\nDEAL ROOM RESERVED · seq #${reserved.seq ?? "?"}\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.room}\nNEXT: Wait for the payer's signed lock, then press CHECK ACTIVE DEAL.`;
   notifyPayeeAutoAccept("Technocore job accepted", `Offer #${deal.offerSeq ?? "?"} is verified. Wait for the payer lock.`);
+  await continueHunterAfterQueuedDeal(deal);
   return true;
 }
 
@@ -472,7 +574,10 @@ async function runPayeeAutoAccept() {
         break;
       }
       if (Date.now() >= deal.offer.expiresMs || Date.now() >= deal.offer.claimByMs) {
-        if (deal.acceptSeq) stopPayeeAutoAccept(`ACCEPT #${deal.acceptSeq} VERIFIED · DEAL-ROOM DEADLINE PASSED`, deal);
+        if (deal.acceptSeq) {
+          stopPayeeAutoAccept(`ACCEPT #${deal.acceptSeq} VERIFIED · DEAL-ROOM DEADLINE PASSED`, deal);
+          await continueHunterAfterQueuedDeal(deal);
+        }
         else await resolveUnacceptedHunterMiss(deal, "auto-accept-expired", "OFFER EXPIRED BEFORE ACCEPT");
         break;
       }
@@ -511,7 +616,7 @@ function renderPayeeAutoHunter() {
   arm.textContent = recoverable ? "VERIFY STALE DEAL & ARM AUTO-JOB HUNTER" : "ARM AUTO-JOB HUNTER";
   stop.disabled = !state.armed;
   status.textContent = state.armed
-    ? `ARMED · TAB MUST STAY OPEN\nMinimum finish time: ${state.minFinishMinutes}m\n${state.status || "Watching signed tclk-offers"}`
+    ? `ARMED · TAB MUST STAY OPEN\nQueued jobs: ${activePayeeDeals().length}/${MAX_ACTIVE_PAYEE_DEALS}\nMinimum finish time: ${state.minFinishMinutes}m\n${state.status || "Watching signed tclk-offers"}`
     : `OFF\n${state.reason || "Arms once, immediately claims the newest actionable PAPER job, then creates its deal room."}`;
 }
 
@@ -532,6 +637,10 @@ async function tryAutoHuntFromPayload(payload) {
   const state = readPayeeAutoHunter();
   const identity = readIdentity();
   if (!state.armed || !identity) return false;
+  if (activePayeeDeals().length >= MAX_ACTIVE_PAYEE_DEALS) {
+    stopPayeeAutoHunter(`QUEUE FULL · ${MAX_ACTIVE_PAYEE_DEALS}/${MAX_ACTIVE_PAYEE_DEALS} ACCEPTED JOBS`);
+    return false;
+  }
   if (readPayeeDeal()) {
     stopPayeeAutoHunter("PAUSED · AN ACTIVE OR PREPARED PAYEE DEAL ALREADY EXISTS");
     return false;
@@ -543,7 +652,10 @@ async function tryAutoHuntFromPayload(payload) {
   state.status = "Checking newest signed offers";
   savePayeeAutoHunter(state);
   const minimumFinishMs = state.minFinishMinutes * 60_000;
-  const safe = (await listSafePaperOffers(payload, identity.did, Date.now(), minimumFinishMs)).slice(0, 8);
+  const knownOfferIds = new Set(Object.values(readPayeeDeals()).map((deal) => deal?.offer?.id).filter(Boolean));
+  const safe = (await listSafePaperOffers(payload, identity.did, Date.now(), minimumFinishMs))
+    .filter((candidate) => !knownOfferIds.has(candidate.offer.id))
+    .slice(0, 8);
   const candidate = await verifyFirstPaperOffer(safe);
   if (!candidate) {
     state.status = "No eligible offer yet · still watching";
@@ -1476,6 +1588,14 @@ $("#payee-auto-hunter").addEventListener("click", async () => {
   if (!identity) { notice("Restore the existing DID before arming the auto-job hunter"); return; }
   let existing = readPayeeDeal();
   if (existing && await archiveCompletedPayeeDeal(existing, identity)) existing = null;
+  if (existing?.acceptSeq && !["auto-accept-expired", "auto-accept-unavailable"].includes(existing.state)) {
+    rememberPayeeDeal(existing);
+    localStorage.removeItem(PAYEE_DEAL_KEY);
+    resetPayeeUi();
+    renderPayeeDealQueue();
+    notice(`Offer #${existing.offerSeq ?? "?"} parked safely in the payee queue`);
+    existing = null;
+  }
   if (existing) {
     if (!["auto-accept-expired", "auto-accept-unavailable"].includes(existing.state)) {
       notice("Finish or discard the active/prepared payee deal before hunting another job");
@@ -1503,11 +1623,16 @@ $("#payee-auto-hunter").addEventListener("click", async () => {
       return;
     }
   }
+  const queuedCount = activePayeeDeals().length;
+  if (queuedCount >= MAX_ACTIVE_PAYEE_DEALS) {
+    notice(`Payee queue is full (${queuedCount}/${MAX_ACTIVE_PAYEE_DEALS}); complete or archive one job first`);
+    return;
+  }
   const minFinishMinutes = Number($("#payee-auto-hunter-minutes").value);
   if (!Number.isInteger(minFinishMinutes) || minFinishMinutes < 10 || minFinishMinutes > 1440) {
     notice("Minimum finish time must be 10-1440 whole minutes"); return;
   }
-  if (!window.confirm(`Arm the automatic PAPER job hunter?\n\nIt will select the first newly verified actionable job with at least ${minFinishMinutes} minutes left and immediately publish its signed accept to win the offer race. Public-web research, repository work, audits, comparisons, extraction, writing and local code/test tasks are eligible; nothing from the job runs automatically. Credential/value requests, unsafe URLs and third-party account mutations remain blocked. After accept verifies, it repeatedly creates the derived deal room; room-capacity 400 no longer leaves the offer unclaimed. If another agent wins first, it verifies that our accept is absent and resumes hunting. Keep this tab open.`)) return;
+  if (!window.confirm(`Arm the automatic PAPER job hunter?\n\nIt will keep up to ${MAX_ACTIVE_PAYEE_DEALS} accepted jobs in a local queue. For each newly verified actionable job with at least ${minFinishMinutes} minutes left, it immediately publishes accept, creates the deal room, parks that job, and resumes hunting. Public-web research, repository work, audits, comparisons, extraction, writing and local code/test tasks are eligible; nothing from a job runs automatically. Credential/value requests, unsafe URLs and third-party account mutations remain blocked. If another agent wins first, it verifies that our accept is absent and continues. Keep this tab open.`)) return;
   const vaultPassword = window.prompt("Create one deal-vault password for the automatically selected job (minimum 12 characters). Save it now; it stays only in this open tab and is required later to reveal.");
   if (!vaultPassword || vaultPassword.length < 12) { notice("Auto-job hunter cancelled — vault password must be at least 12 characters"); return; }
   let notificationPermission = "unsupported";
@@ -1523,7 +1648,7 @@ $("#payee-auto-hunter").addEventListener("click", async () => {
       minFinishMinutes,
       notificationPermission,
       armedAt: new Date().toISOString(),
-      status: "ARMING · READING CURRENT SIGNED OFFERS",
+      status: `ARMING · ${queuedCount}/${MAX_ACTIVE_PAYEE_DEALS} JOBS SECURED · READING CURRENT OFFERS`,
     });
     notice("Auto-job hunter is arming; reading the current signed offers");
     const tail = await readOfferTail();
@@ -1545,6 +1670,7 @@ $("#payee-auto-hunter-stop").addEventListener("click", () => {
 
 async function acceptPaperOffer(offer, jobSnapshot) {
   const identity = readIdentity(); if (!identity) return;
+  if (activePayeeDeals().length >= MAX_ACTIVE_PAYEE_DEALS) { notice(`Payee queue is full (${MAX_ACTIVE_PAYEE_DEALS}/${MAX_ACTIVE_PAYEE_DEALS})`); return; }
   const existing = readPayeeDeal();
   if (existing && await archiveCompletedPayeeDeal(existing, identity)) notice("Previous completed deal archived locally; continuing with the new job");
   if (readPayeeDeal()) { notice("Finish the active payee deal before accepting another"); return; }
@@ -1554,7 +1680,7 @@ async function acceptPaperOffer(offer, jobSnapshot) {
   if (!vaultPassword || vaultPassword.length < 12) { notice("Accept cancelled — deal-vault password must be at least 12 characters"); return; }
   const sealedSecret = await sealSecret(vaultPassword, prepared.contract, prepared.secret);
   const deal = { offer, accept: prepared.accept, room: prepared.room, sealedSecret, jobSnapshot, acceptedAt: new Date().toISOString(), state: "room-reservation-pending" };
-  localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
+  savePayeeDeal(deal);
   const nonce = Date.now(); const signature = await sign(identity, prepared.room, nonce, prepared.line);
   window.open(signedUrl(prepared.room, identity, signature, nonce, prepared.line), "_blank", "noopener,noreferrer");
   $("#check-payee-deal").disabled = false;
@@ -1609,6 +1735,7 @@ async function archiveCompletedPayeeDeal(deal, identity) {
 
 async function armPaperOfferAutoAccept(offer, jobSnapshot, offerSeq) {
   const identity = readIdentity(); if (!identity) return;
+  if (activePayeeDeals().length >= MAX_ACTIVE_PAYEE_DEALS) { notice(`Payee queue is full (${MAX_ACTIVE_PAYEE_DEALS}/${MAX_ACTIVE_PAYEE_DEALS})`); return; }
   let existing = readPayeeDeal();
   if (existing && await archiveCompletedPayeeDeal(existing, identity)) {
     existing = null;
@@ -1893,7 +2020,7 @@ $("#check-payee-deal").addEventListener("click", async () => {
       if (Date.now() >= deal.offer.expiresMs) throw new Error("Offer expired before acceptance; discard the local reservation");
       const line = encodeFrame(deal.accept); const nonce = Date.now(); const signature = await sign(identity, OFFER_ROOM, nonce, line);
       deal.state = "accept-pending"; deal.reservationSeq = reserved.seq;
-      localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
+      savePayeeDeal(deal);
       window.open(signedUrl(OFFER_ROOM, identity, signature, nonce, line), "_blank", "noopener,noreferrer");
       $("#payee-status").textContent = `DEAL ROOM RESERVED · seq #${reserved.seq}\nACCEPT SUBMISSION OPENED — confirm Technocore says ok, then press CHECK ACTIVE DEAL again.`;
       notice("Room is confirmed; the signed offer acceptance is now open for your confirmation");
@@ -1922,7 +2049,7 @@ $("#check-payee-deal").addEventListener("click", async () => {
     deal.state = folded.state.status; deal.acceptSeq = accepted.seq; deal.lockValid = lockValid; deal.railState = railState;
     deal.deliverySeq = delivery?.seq ?? null;
     deal.deliveryText = delivery?.text ?? null;
-    localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
+    savePayeeDeal(deal);
     $("#payee-delivery").disabled = folded.state.status !== "locked" || !lockValid || Boolean(delivery);
     $("#publish-payee-delivery").disabled = folded.state.status !== "locked" || !lockValid || Boolean(delivery);
     if (delivery) $("#payee-delivery").value = delivery.text;
@@ -1943,7 +2070,7 @@ $("#discard-payee-deal").addEventListener("click", async () => {
     const accepted = await verifyAcceptRecord(await readOfferHistory(), deal.offer, deal.accept);
     if (accepted) {
       deal.state = "accepted"; deal.acceptSeq = accepted.seq;
-      localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
+      savePayeeDeal(deal);
       $("#payee-status").textContent = `DISCARD BLOCKED — ACCEPT VERIFIED · seq #${accepted.seq}\nContract: ${deal.accept.contract}\nContinue with CHECK ACTIVE DEAL.`;
       notice("This accept exists on Technocore and cannot be discarded");
       return;
@@ -1951,6 +2078,7 @@ $("#discard-payee-deal").addEventListener("click", async () => {
     if (!window.confirm("No matching accept was found on Technocore. Stop auto-accept and discard this local pending deal and its encrypted secret? This cannot be undone.")) return;
     stopPayeeAutoAccept("STOPPED AND DISCARDED", null);
     if (deal.selectedBy === "auto-job-hunter") payeeAutoHunterVaultPassword = null;
+    forgetPayeeDeal(deal.accept.contract);
     localStorage.removeItem(PAYEE_DEAL_KEY);
     resetPayeeUi();
     notice("Unconfirmed local payee deal discarded");
@@ -2001,7 +2129,7 @@ $("#publish-payee-delivery").addEventListener("click", async () => {
     const existing = (await listSignedDeliveries(await roomResponse.json(), deal.accept)).find((item) => item.text === text);
     if (existing) {
       deal.deliverySeq = existing.seq ?? null; deal.deliveryText = existing.text;
-      localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
+      savePayeeDeal(deal);
       notice(`Exact signed delivery already exists at seq #${existing.seq ?? "?"}; no duplicate opened`);
       return;
     }
@@ -2019,7 +2147,7 @@ $("#publish-reveal").addEventListener("click", async () => {
   const delivery = (await listSignedDeliveries(await roomResponse.json(), deal.accept)).at(-1);
   if (!delivery) { notice("Reveal blocked: publish and verify the signed job delivery first"); return; }
   deal.deliverySeq = delivery.seq ?? null; deal.deliveryText = delivery.text;
-  localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
+  savePayeeDeal(deal);
   const vaultPassword = window.prompt("Enter the deal-vault password to decrypt the reveal secret."); if (!vaultPassword) return;
   let secret; try { secret = await openSecret(vaultPassword, deal.accept.contract, deal.sealedSecret); } catch { notice("Deal-vault password is incorrect"); return; }
   const reveal = makePayeeReveal(deal.accept, identity.did, secret);
@@ -2058,6 +2186,8 @@ renderTrackRecord();
 renderPayerAutopilot();
 renderPayerAutoSettle();
 renderPayeeAutoAccept();
+if (readPayeeDeal()) rememberPayeeDeal(readPayeeDeal());
+renderPayeeDealQueue();
 if (readPayeeAutoHunter().armed) {
   const staleHunter = readPayeeAutoHunter();
   localStorage.setItem(PAYEE_AUTO_HUNTER_KEY, JSON.stringify({
@@ -2079,7 +2209,7 @@ if (readPayeeDeal()) {
   const payeeLabel = payeeDeal.state === "auto-accept-armed"
     ? "AUTO-ACCEPT ARMED — JOB NOT ACCEPTED"
     : payeeDeal.state === "auto-accept-expired"
-      ? "EXPIRED BEFORE ROOM SLOT — NO ACCEPT VERIFIED"
+      ? "EXPIRED BEFORE ACCEPT — NO ACCEPT VERIFIED"
     : payeeDeal.state === "auto-accept-unavailable"
       ? "OFFER UNAVAILABLE — NO ACCEPT VERIFIED"
     : payeeDeal.state === "room-reservation-pending"
