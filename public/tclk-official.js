@@ -3320,6 +3320,13 @@ async function verifyExactFrameRecord(raw, expected, room) {
   }
   return null;
 }
+async function verifyExactSignedTextRecord(raw, expectedText, from, room) {
+  for (const record of records(raw)) {
+    if (record.text !== expectedText || record.from !== from) continue;
+    if (await validTransportSignature(record, room)) return { seq: record.seq ?? null, record };
+  }
+  return null;
+}
 function recordTime(record, fallback) {
   return Number.isFinite(Date.parse(record.ts)) ? Date.parse(record.ts) : fallback;
 }
@@ -3601,6 +3608,15 @@ function makePayeeReceipt(accept, from, outcome = "claimed") {
   const frame = { type: "receipt", from, contract: accept.contract, outcome, rail: "paper", ref: accept.contract };
   return { frame, line: encodeFrame(frame), room: dealRoom(accept.contract) };
 }
+function makePayerDeliveryReview(offer, accept, from, deliverySeq, verdict, reason) {
+  if (from !== offer.from) throw new Error("Only the offer payer can review the delivery");
+  if (accept.ref !== offer.id || !Number.isInteger(Number(deliverySeq)) || Number(deliverySeq) < 1) throw new Error("A bound signed delivery is required");
+  if (verdict !== "PASS" && verdict !== "FAIL") throw new Error("A PASS or FAIL review verdict is required");
+  const detail = String(reason || "").replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, " ").replace(/\s+/g, " ").trim();
+  if (detail.length < 3 || detail.length > 240) throw new Error("Review reason must be 3-240 characters");
+  const line = `review ${offer.id.slice(0, 18)} contract ${accept.contract.slice(0, 18)} payee ${accept.from.slice(-8)} ${verdict} ${verdict === "PASS" ? 1 : 0} \u2014 signed delivery #${Number(deliverySeq)}: ${detail}`;
+  return { line, room: dealRoom(accept.contract) };
+}
 function makePayerRefund(accept, from) {
   const frame = { type: "refund", from, contract: accept.contract };
   return { frame, line: encodeFrame(frame), room: dealRoom(accept.contract) };
@@ -3642,13 +3658,15 @@ export {
   makePayeeAcceptance,
   makePayeeReceipt,
   makePayeeReveal,
+  makePayerDeliveryReview,
   makePayerRefund,
   makeSimpleVerificationOffer,
   reviewJobSpec,
   summarizeDealActivity,
   verifyAcceptRecord,
   verifyBoundJobSpec,
-  verifyExactFrameRecord
+  verifyExactFrameRecord,
+  verifyExactSignedTextRecord
 };
 /*! Bundled license information:
 

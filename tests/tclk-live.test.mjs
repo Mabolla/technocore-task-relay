@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeAccept, generateHashLock, makeOffer, verifySecret } from "@flop-labs/tclk";
-import { JOB_TEMPLATES, OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerRefund, makeSimpleVerificationOffer, reviewJobSpec, summarizeDealActivity, verifyBoundJobSpec } from "../src/tclk-browser-entry.mjs";
+import { JOB_TEMPLATES, OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerDeliveryReview, makePayerRefund, makeSimpleVerificationOffer, reviewJobSpec, summarizeDealActivity, verifyBoundJobSpec, verifyExactSignedTextRecord } from "../src/tclk-browser-entry.mjs";
 
 const payer = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -66,6 +66,17 @@ test("lists only non-frame delivery text signed by the accepted payee", async ()
   const signedFrame = { ...(await record(payeeAgent, room, encodeFrame(reveal), String(now + 2), new Date(now + 2).toISOString())), seq: 3 };
   const found = await listSignedDeliveries({ messages: [delivery, signedFrame, { from: payeeAgent.did, text: "unsigned delivery" }] }, accept);
   assert.deepEqual(found.map((entry) => entry.seq), [2]);
+});
+
+test("builds and verifies an explicit DID-signed payer FAIL review", async () => {
+  const now = Date.now(); const payerAgent = await signer(); const payeeAgent = await signer();
+  const offer = makeOffer({ from: payerAgent.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 60_000, claimByMs: now + 3_600_000, refundAfterMs: now + 7_200_000, job: { proto: "a2a", id: "job-review", context: "/kv/jobs/job-review" } });
+  const accept = makeAccept(offer, { from: payeeAgent.did, statement: generateHashLock().hash });
+  const review = makePayerDeliveryReview(offer, accept, payerAgent.did, 2, "FAIL", "Delivery must be 150-300 characters");
+  const signed = { ...(await record(payerAgent, review.room, review.line, String(now + 2), new Date(now + 2).toISOString())), seq: 5 };
+  assert.match(review.line, /payee .* FAIL 0 — signed delivery #2: Delivery must be 150-300 characters/);
+  assert.equal((await verifyExactSignedTextRecord({ messages: [signed] }, review.line, payerAgent.did, review.room)).seq, 5);
+  assert.equal(await verifyExactSignedTextRecord({ messages: [{ ...signed, text: `${review.line} changed` }] }, review.line, payerAgent.did, review.room), null);
 });
 
 test("builds editable easy, medium, hard, and custom hash-bound jobs", async () => {

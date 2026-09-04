@@ -304,6 +304,16 @@ test("manual payer settlement requires a signed delivery and blocks duplicate re
   assert.match(source, /\$\("#approve-payer-delivery"\)\?\.addEventListener/);
 });
 
+test("deterministic delivery failures can publish one explicit signed FAIL review", () => {
+  assert.match(source, /SIGN DELIVERY FAIL REVIEW/);
+  assert.match(source, /makePayerDeliveryReview/);
+  assert.match(source, /verifyExactSignedTextRecord/);
+  assert.match(source, /DELIVERY REJECTED · FAIL REVIEW/);
+  assert.match(source, /Signed FAIL review already exists at seq/);
+  assert.match(source, /entry\.deliveryRejected/);
+  assert.match(source, /CLAIMED · DELIVERY REJECTED/);
+});
+
 test("payee publishes and verifies a signed delivery before revealing", () => {
   assert.match(source, /SIGN &amp; PUBLISH DELIVERY/);
   assert.match(source, /publish-payee-delivery/);
