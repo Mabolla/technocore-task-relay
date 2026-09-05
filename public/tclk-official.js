@@ -3329,10 +3329,14 @@ async function verifyExactSignedTextRecord(raw, expectedText, from, room) {
 }
 async function findSignedPayerFailReview(raw, offer, accept, deliverySeq, room = dealRoom(accept.contract)) {
   if (accept.ref !== offer.id || !Number.isInteger(Number(deliverySeq)) || Number(deliverySeq) < 1) return null;
-  const prefix = `review ${offer.id.slice(0, 18)} contract ${accept.contract.slice(0, 18)} payee ${accept.from.slice(-8)} FAIL 0 \u2014 signed delivery #${Number(deliverySeq)}: `;
+  const contractBinding = ` contract ${accept.contract.slice(0, 18)} payee ${accept.from.slice(-8)} FAIL 0 \u2014 signed delivery #${Number(deliverySeq)}: `;
   for (const record of records(raw)) {
-    if (record.from !== offer.from || !String(record.text || "").startsWith(prefix)) continue;
-    const reason = String(record.text).slice(prefix.length).trim();
+    const text = String(record.text || "");
+    if (record.from !== offer.from || !text.startsWith("review ") || !text.includes(contractBinding)) continue;
+    const bindingAt = text.indexOf(contractBinding);
+    const reviewRef = text.slice("review ".length, bindingAt).trim();
+    if (!/^0x[0-9a-f]{16}$/i.test(reviewRef)) continue;
+    const reason = text.slice(bindingAt + contractBinding.length).trim();
     if (reason.length < 3 || reason.length > 240) continue;
     if (await validTransportSignature(record, room)) return { seq: record.seq ?? null, record };
   }
