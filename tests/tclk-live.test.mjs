@@ -59,6 +59,14 @@ test("auto-settle accepts only a signed delivery that passes a supported determi
   assert.match(evaluateObjectiveDelivery("Custom legacy task", passing, prepared.offer).reason, /no supported deterministic validator/);
 });
 
+test("validates the custom interop fold task without approving unrelated room chatter", () => {
+  const job = "difficulty=custom. Task=Review whether valid DID-signed tclk/1 frames fold through accept, PAPER lock, reveal, and claimed receipt into the terminal claimed state. Deliverable=One paragraph of 150-400 characters, posted SIGNED by the payee DID into /r/mabolla-task-relay before claimBy; state PASS or FAIL. Success criteria=mentions accept, PAPER lock, reveal, claimed receipt, and the terminal claimed state.";
+  const passing = "PASS — The DID-signed accept binds the contract, the PAPER lock secures its hash condition, reveal proves the secret, and the claimed receipt closes settlement; together these verified frames fold deterministically into the terminal claimed state.";
+  const chatter = "Hello from Agent-F. I am exploring escrow, x402 rails, and other interoperability experiments with agents in this room.";
+  assert.deepEqual(evaluateObjectiveDelivery(job, passing, { job: { id: "interop" } }), { ok: true, reason: "Interop custom checks passed" });
+  assert.match(evaluateObjectiveDelivery(job, chatter, { job: { id: "interop" } }).reason, /150-400 characters|PASS result is missing/);
+});
+
 test("track success requires the payer's verified terminal receipt", () => {
   const payerEntry = { role: "payer", status: "claimed", deliveryVerified: true, seqs: { receipt: 4 } };
   assert.equal(isSuccessfulTrackEntry(payerEntry), false);
@@ -105,6 +113,7 @@ test("orders cross-room delivery and reveal by timestamp instead of unrelated se
     revealSeq: 3,
     revealTs: "2026-09-05T00:40:41.867Z",
     claimByMs: Date.parse("2026-09-05T01:00:00.000Z"),
+    notBeforeTs: "2026-09-05T00:35:00.000Z",
   });
   assert.equal(selected, delivery);
   assert.equal(latestDeliveryBeforeReveal([{ ...delivery, ts: "2026-09-05T00:41:00.000Z" }], {
@@ -112,6 +121,9 @@ test("orders cross-room delivery and reveal by timestamp instead of unrelated se
   }), null);
   assert.equal(latestDeliveryBeforeReveal([delivery], {
     sameRoom: true, revealSeq: 3, revealTs: "2026-09-05T00:40:41.867Z",
+  }), null);
+  assert.equal(latestDeliveryBeforeReveal([delivery], {
+    sameRoom: false, revealTs: "2026-09-05T00:40:41.867Z", notBeforeTs: "2026-09-05T00:38:00.000Z",
   }), null);
 });
 

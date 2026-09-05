@@ -3550,10 +3550,12 @@ async function listSignedDeliveries(raw, accept, deliveryRoom = dealRoom(accept.
   }
   return deliveries.sort((left, right) => Number(left.seq || 0) - Number(right.seq || 0));
 }
-function latestDeliveryBeforeReveal(deliveries, { sameRoom, revealSeq = null, revealTs = null, claimByMs = null } = {}) {
+function latestDeliveryBeforeReveal(deliveries, { sameRoom, revealSeq = null, revealTs = null, claimByMs = null, notBeforeTs = null } = {}) {
   const revealAt = Date.parse(revealTs || "");
+  const notBeforeAt = Date.parse(notBeforeTs || "");
   return [...deliveries || []].filter((delivery) => {
     const deliveredAt = Date.parse(delivery?.ts || "");
+    if (Number.isFinite(notBeforeAt) && (!Number.isFinite(deliveredAt) || deliveredAt < notBeforeAt)) return false;
     if (claimByMs != null && Number.isFinite(Number(claimByMs)) && (!Number.isFinite(deliveredAt) || deliveredAt > Number(claimByMs))) return false;
     if (sameRoom && revealSeq != null && delivery?.seq != null) return Number(delivery.seq) < Number(revealSeq);
     if (Number.isFinite(revealAt)) return Number.isFinite(deliveredAt) && deliveredAt < revealAt;
@@ -3581,7 +3583,7 @@ function evaluateObjectiveDelivery(jobText, deliveryText, offer) {
   const job = String(jobText || "").replace(/\s+/g, " ").trim();
   const requirements = job.split(/\bsafety=/i)[0].trim();
   const delivery = String(deliveryText || "").replace(/\s+/g, " ").trim();
-  const level = job.match(/^difficulty=(easy|medium|hard)\./i)?.[1]?.toLowerCase();
+  const level = job.match(/^difficulty=(easy|medium|hard|custom)\./i)?.[1]?.toLowerCase();
   if (!level) return { ok: false, reason: "This job has no supported deterministic validator" };
   if (/\bFAIL\b/i.test(delivery)) return { ok: false, reason: "Delivery reports a failed check" };
   const range = job.match(/(?:deliverable=.*?)\b(\d{2,4})\s*[-–]\s*(\d{2,4})\s+characters\b/i);
@@ -3594,6 +3596,20 @@ function evaluateObjectiveDelivery(jobText, deliveryText, offer) {
   if (/asset|paper-only|paper only/i.test(requirements) && !/\bPAPER\b/i.test(delivery)) return { ok: false, reason: "PAPER asset/rail result is missing" };
   if (/signature/i.test(job) && !/(?:signature|ed25519)[^.!?]{0,200}(?:valid|pass|true)|(?:valid|pass|true)[^.!?]{0,200}(?:signature|ed25519)/i.test(delivery)) {
     return { ok: false, reason: "A passing signature result is missing" };
+  }
+  if (level === "custom") {
+    const interopFold = /fold through accept/i.test(job) && /terminal claimed state/i.test(job) && /claimed receipt/i.test(job);
+    if (!interopFold) return { ok: false, reason: "This custom job has no supported deterministic validator" };
+    if (!/\bPASS\b/i.test(delivery)) return { ok: false, reason: "PASS result is missing" };
+    const requiredTerms = [
+      ["accept", /\baccept\b/i],
+      ["PAPER lock", /\bpaper(?:rail)?\b[^.!?]{0,60}\block\b|\block\b[^.!?]{0,60}\bpaper(?:rail)?\b/i],
+      ["reveal", /\breveal\b/i],
+      ["claimed receipt", /\bclaimed receipt\b/i],
+      ["terminal claimed state", /\bterminal claimed state\b/i]
+    ];
+    for (const [label, expression] of requiredTerms) if (!expression.test(delivery)) return { ok: false, reason: `${label} evidence is missing` };
+    return { ok: true, reason: "Interop custom checks passed" };
   }
   if (level === "easy") {
     if (!/\bPASS\b/i.test(delivery)) return { ok: false, reason: "PASS result is missing" };

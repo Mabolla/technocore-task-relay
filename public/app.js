@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, deliveryRoomFromJobText, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, latestDeliveryBeforeReveal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, resolveDeliveryRoom, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord, verifyExactSignedTextRecord } from "./tclk-official.js?v=cross-room-delivery-order-1";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, deliveryRoomFromJobText, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, latestDeliveryBeforeReveal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, resolveDeliveryRoom, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord, verifyExactSignedTextRecord } from "./tclk-official.js?v=delivery-binding-1";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -909,10 +909,27 @@ async function inspectPayerNoDeliveryReview(deal, roomPayload) {
 }
 
 async function inspectSignedPayerDelivery(deal, roomPayload, folded) {
-  const deliveries = await listSignedDeliveries(roomPayload, deal.accept);
-  const revealSeq = folded.applied.find((entry) => entry.frame.type === "reveal")?.seq;
-  const delivery = deliveries.filter((entry) => revealSeq == null || entry.seq == null || Number(entry.seq) < Number(revealSeq)).at(-1);
+  const job = await readJobForAutoSettle(deal);
+  const fallbackRoom = deal.lock?.room || deal.room;
+  const deliveryRoom = resolveDeliveryRoom(job?.text || "", fallbackRoom, deal.deliveryRoom);
+  let deliveryPayload = roomPayload;
+  if (deliveryRoom !== fallbackRoom) {
+    const response = await fetch(`https://technocore.chat/r/${deliveryRoom}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+    deliveryPayload = response.status === 404 ? { messages: [] } : response.ok ? await response.json() : null;
+    if (!deliveryPayload) throw new Error(`Delivery room read failed (${response.status})`);
+  }
+  const deliveries = await listSignedDeliveries(deliveryPayload, deal.accept, deliveryRoom);
+  const revealEvent = folded.applied.find((entry) => entry.frame.type === "reveal");
+  const lockEvent = folded.applied.find((entry) => entry.frame.type === "lock");
+  const delivery = lockEvent?.ts ? latestDeliveryBeforeReveal(deliveries, {
+    sameRoom: deliveryRoom === fallbackRoom,
+    revealSeq: revealEvent?.seq,
+    revealTs: revealEvent?.ts,
+    claimByMs: deal.offer.claimByMs,
+    notBeforeTs: lockEvent.ts,
+  }) : null;
   const previousSeq = deal.deliverySeq;
+  deal.deliveryRoom = deliveryRoom;
   delete deal.deliverySeq;
   delete deal.deliveryPreview;
   delete deal.deliveryEvaluation;
@@ -921,7 +938,6 @@ async function inspectSignedPayerDelivery(deal, roomPayload, folded) {
     delete deal.manualDeliveryApprovedSeq;
     return null;
   }
-  const job = await readJobForAutoSettle(deal);
   const evaluation = job ? evaluateObjectiveDelivery(job.text, delivery.text, deal.offer) : { ok: false, reason: "Job specification is not machine-verifiable" };
   deal.deliverySeq = delivery.seq;
   deal.deliveryPreview = delivery.text.slice(0, 1000);
@@ -978,17 +994,19 @@ async function inspectAndAutoSettle(deal) {
   if (!roomResponse.ok) throw new Error(`Deal room read failed (${roomResponse.status})`);
   const roomPayload = await roomResponse.json();
   const folded = await foldPayeeDeal(roomPayload, deal.offer, deal.accept);
-  const deliveries = await listSignedDeliveries(roomPayload, deal.accept);
   const expected = expectedPaperLock(deal.offer, deal.accept);
   const noteResponse = await fetch(`https://technocore.chat/kv/${expected.note.ns}/${expected.note.key}?n=${Date.now()}`, { cache: "no-store" });
   const railState = noteResponse.ok ? classifyPaperRecord(stripNoteBanner(await noteResponse.text()), deal.offer, deal.accept) : "absent";
   deal.state = folded.state.status;
   deal.railState = railState;
   deal.checkedAt = new Date().toISOString();
+  const inspected = ["locked", "claimed"].includes(folded.state.status)
+    ? await inspectSignedPayerDelivery(deal, roomPayload, folded)
+    : null;
 
   if (folded.state.status === "locked") {
-    if (deliveries.length) {
-      const delivery = deliveries.at(-1);
+    if (inspected?.delivery) {
+      const { delivery } = inspected;
       deal.autoSettleStatus = `SIGNED DELIVERY #${delivery.seq ?? "?"} · WAITING FOR VALID REVEAL`;
       notifyAutoSettle(deal, `delivery:${delivery.seq}`, "Technocore delivery received", `${payerDealLabel(deal)} has a signed delivery and is waiting for reveal.`);
     } else if (Date.now() >= deal.offer.refundAfterMs) {
@@ -1020,7 +1038,6 @@ async function inspectAndAutoSettle(deal) {
     return;
   }
 
-  const inspected = await inspectSignedPayerDelivery(deal, roomPayload, folded);
   if (!inspected) {
     const rejected = await inspectPayerNoDeliveryReview(deal, roomPayload);
     deal.autoSettleStatus = rejected ? `NO DELIVERY REJECTED · FAIL REVIEW #${rejected.seq ?? "?"}` : "REVIEW REQUIRED · NO SIGNED DELIVERY BEFORE REVEAL";
@@ -2168,12 +2185,13 @@ async function syncTrackRecord({ announce = true } = {}) {
           }
           entry.deliveryRoom = deliveryRoom;
           const deliveries = await listSignedDeliveries(deliveryPayload, entry.accept, deliveryRoom);
-          const delivery = latestDeliveryBeforeReveal(deliveries, {
+          const delivery = deal.times?.lock ? latestDeliveryBeforeReveal(deliveries, {
             sameRoom: deliveryRoom === entry.room,
             revealSeq: deal.seqs.reveal,
             revealTs: deal.times?.reveal,
             claimByMs: entry.offer.claimByMs,
-          });
+            notBeforeTs: deal.times.lock,
+          }) : null;
           entry.deliverySeq = delivery?.seq ?? null;
           entry.deliveryText = delivery?.text ?? null;
           const expectedPayerReceipt = makePayeeReceipt(entry.accept, entry.offer.from, "claimed");
@@ -2329,13 +2347,16 @@ $("#check-payee-deal").addEventListener("click", async () => {
     const deliveryPayload = deliveryRoom === deal.room ? roomPayload : (await readPayeeDeliveryRoom(deal)).payload;
     const deliveries = await listSignedDeliveries(deliveryPayload, deal.accept, deliveryRoom);
     const revealEvent = folded.applied.find((item) => item.frame.type === "reveal");
-    const delivery = latestDeliveryBeforeReveal(deliveries, {
+    const lockEvent = folded.applied.find((item) => item.frame.type === "lock");
+    const delivery = lockEvent?.ts ? latestDeliveryBeforeReveal(deliveries, {
       sameRoom: deliveryRoom === deal.room,
       revealSeq: revealEvent?.seq,
       revealTs: revealEvent?.ts,
       claimByMs: deal.offer.claimByMs,
-    });
+      notBeforeTs: lockEvent.ts,
+    }) : null;
     deal.state = folded.state.status; deal.acceptSeq = accepted.seq; deal.lockValid = lockValid; deal.railState = railState;
+    deal.lockTs = lockEvent?.ts ?? null;
     deal.deliveryRoom = deliveryRoom;
     deal.deliverySeq = delivery?.seq ?? null;
     deal.deliveryText = delivery?.text ?? null;
@@ -2415,7 +2436,11 @@ $("#publish-payee-delivery").addEventListener("click", async () => {
   }
   try {
     const { room: deliveryRoom, payload } = await readPayeeDeliveryRoom(deal);
-    const existing = (await listSignedDeliveries(payload, deal.accept, deliveryRoom)).find((item) => item.text === text);
+    const existing = (await listSignedDeliveries(payload, deal.accept, deliveryRoom)).find((item) => {
+      const deliveredAt = Date.parse(item.ts || "");
+      const lockedAt = Date.parse(deal.lockTs || "");
+      return item.text === text && (!Number.isFinite(lockedAt) || (Number.isFinite(deliveredAt) && deliveredAt >= lockedAt));
+    });
     if (existing) {
       deal.deliveryRoom = deliveryRoom; deal.deliverySeq = existing.seq ?? null; deal.deliveryText = existing.text;
       savePayeeDeal(deal);
@@ -2440,6 +2465,7 @@ $("#publish-reveal").addEventListener("click", async () => {
   const delivery = latestDeliveryBeforeReveal(await listSignedDeliveries(deliveryPayload, deal.accept, deliveryRoom), {
     sameRoom: deliveryRoom === deal.room,
     claimByMs: deal.offer.claimByMs,
+    notBeforeTs: deal.lockTs,
   });
   if (!delivery) { notice("Reveal blocked: publish and verify the signed job delivery first"); return; }
   deal.deliveryRoom = deliveryRoom; deal.deliverySeq = delivery.seq ?? null; deal.deliveryText = delivery.text;

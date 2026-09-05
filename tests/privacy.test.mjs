@@ -124,6 +124,7 @@ test("renders a verified tclk track record with lifecycle sequence numbers", () 
   assert.match(source, /resolveDeliveryRoom\(entry\.jobText \|\| "", entry\.room, rememberedExternalRoom\)/);
   assert.match(source, /latestDeliveryBeforeReveal\(deliveries/);
   assert.match(source, /revealTs: deal\.times\?\.reveal/);
+  assert.match(source, /notBeforeTs: deal\.times\.lock/);
   assert.match(source, /verified current or locally retained tclk record/);
 });
 
@@ -303,6 +304,8 @@ test("safe auto-settle fails closed before signing a terminal payer receipt", ()
 test("manual payer settlement requires a signed delivery and blocks duplicate receipts", () => {
   assert.match(source, /SIGNED DELIVERY GATE/);
   assert.match(source, /inspectSignedPayerDelivery/);
+  assert.match(source, /resolveDeliveryRoom\(job\?\.text \|\| "", fallbackRoom, deal\.deliveryRoom\)/);
+  assert.match(source, /notBeforeTs: lockEvent\.ts/);
   assert.match(source, /claimedDeliveryApproved/);
   assert.match(source, /Receipt stays disabled/);
   assert.match(source, /no approved signed delivery exists before reveal/);
