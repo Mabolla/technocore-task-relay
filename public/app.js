@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, deliveryRoomFromJobText, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, resolveDeliveryRoom, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord, verifyExactSignedTextRecord } from "./tclk-official.js?v=delivery-room-recovery-1";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, deliveryRoomFromJobText, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, latestDeliveryBeforeReveal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, resolveDeliveryRoom, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord, verifyExactSignedTextRecord } from "./tclk-official.js?v=cross-room-delivery-order-1";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -2157,7 +2157,12 @@ async function syncTrackRecord({ announce = true } = {}) {
           }
           entry.deliveryRoom = deliveryRoom;
           const deliveries = await listSignedDeliveries(deliveryPayload, entry.accept, deliveryRoom);
-          const delivery = deliveries.filter((item) => deal.seqs.reveal == null || item.seq == null || Number(item.seq) < Number(deal.seqs.reveal)).at(-1);
+          const delivery = latestDeliveryBeforeReveal(deliveries, {
+            sameRoom: deliveryRoom === entry.room,
+            revealSeq: deal.seqs.reveal,
+            revealTs: deal.times?.reveal,
+            claimByMs: entry.offer.claimByMs,
+          });
           entry.deliverySeq = delivery?.seq ?? null;
           entry.deliveryText = delivery?.text ?? null;
           const expectedPayerReceipt = makePayeeReceipt(entry.accept, entry.offer.from, "claimed");
@@ -2312,7 +2317,13 @@ $("#check-payee-deal").addEventListener("click", async () => {
     const deliveryRoom = payeeDeliveryRoom(deal);
     const deliveryPayload = deliveryRoom === deal.room ? roomPayload : (await readPayeeDeliveryRoom(deal)).payload;
     const deliveries = await listSignedDeliveries(deliveryPayload, deal.accept, deliveryRoom);
-    const delivery = deliveries.at(-1) || null;
+    const revealEvent = folded.applied.find((item) => item.frame.type === "reveal");
+    const delivery = latestDeliveryBeforeReveal(deliveries, {
+      sameRoom: deliveryRoom === deal.room,
+      revealSeq: revealEvent?.seq,
+      revealTs: revealEvent?.ts,
+      claimByMs: deal.offer.claimByMs,
+    });
     deal.state = folded.state.status; deal.acceptSeq = accepted.seq; deal.lockValid = lockValid; deal.railState = railState;
     deal.deliveryRoom = deliveryRoom;
     deal.deliverySeq = delivery?.seq ?? null;
@@ -2415,7 +2426,10 @@ $("#publish-reveal").addEventListener("click", async () => {
   try {
     ({ room: deliveryRoom, payload: deliveryPayload } = await readPayeeDeliveryRoom(deal));
   } catch (error) { notice(`Reveal blocked: ${error.message}`); return; }
-  const delivery = (await listSignedDeliveries(deliveryPayload, deal.accept, deliveryRoom)).at(-1);
+  const delivery = latestDeliveryBeforeReveal(await listSignedDeliveries(deliveryPayload, deal.accept, deliveryRoom), {
+    sameRoom: deliveryRoom === deal.room,
+    claimByMs: deal.offer.claimByMs,
+  });
   if (!delivery) { notice("Reveal blocked: publish and verify the signed job delivery first"); return; }
   deal.deliveryRoom = deliveryRoom; deal.deliverySeq = delivery.seq ?? null; deal.deliveryText = delivery.text;
   savePayeeDeal(deal);

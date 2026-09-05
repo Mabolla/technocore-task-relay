@@ -3428,10 +3428,14 @@ async function listRecentAcceptedPayerDeals(raw, payerDids, now = Date.now(), li
 async function summarizeDealActivity(raw, offer, accept, now = Date.now()) {
   const folded = await foldPayeeDeal(raw, offer, accept, now);
   const seqs = {};
-  for (const { seq, frame } of folded.applied) {
-    if (["lock", "reveal", "refund", "cancel", "receipt"].includes(frame.type) && seqs[frame.type] == null) seqs[frame.type] = seq ?? null;
+  const times = {};
+  for (const { seq, ts, frame } of folded.applied) {
+    if (["lock", "reveal", "refund", "cancel", "receipt"].includes(frame.type) && seqs[frame.type] == null) {
+      seqs[frame.type] = seq ?? null;
+      times[frame.type] = ts ?? null;
+    }
   }
-  return { status: folded.state.status, room: folded.room, seqs };
+  return { status: folded.state.status, room: folded.room, seqs, times };
 }
 async function listSafePaperOffers(raw, myDid, now = Date.now(), minimumFinishMs = 0) {
   const decoded = records(raw).map((record) => ({ record, frame: tryDecodeFrame(record.text || "") }));
@@ -3529,7 +3533,7 @@ async function foldPayeeDeal(raw, offer, accept, now = Date.now()) {
     const step = applyFrame(state, frame, at);
     if (step.ok) {
       state = step.state;
-      applied.push({ seq: record.seq, frame });
+      applied.push({ seq: record.seq, ts: record.ts ?? null, frame });
     }
   }
   return { state, applied, room };
@@ -3545,6 +3549,16 @@ async function listSignedDeliveries(raw, accept, deliveryRoom = dealRoom(accept.
     deliveries.push({ seq: record.seq ?? null, ts: record.ts ?? null, text });
   }
   return deliveries.sort((left, right) => Number(left.seq || 0) - Number(right.seq || 0));
+}
+function latestDeliveryBeforeReveal(deliveries, { sameRoom, revealSeq = null, revealTs = null, claimByMs = null } = {}) {
+  const revealAt = Date.parse(revealTs || "");
+  return [...deliveries || []].filter((delivery) => {
+    const deliveredAt = Date.parse(delivery?.ts || "");
+    if (claimByMs != null && Number.isFinite(Number(claimByMs)) && (!Number.isFinite(deliveredAt) || deliveredAt > Number(claimByMs))) return false;
+    if (sameRoom && revealSeq != null && delivery?.seq != null) return Number(delivery.seq) < Number(revealSeq);
+    if (Number.isFinite(revealAt)) return Number.isFinite(deliveredAt) && deliveredAt < revealAt;
+    return revealSeq == null;
+  }).at(-1) || null;
 }
 function deliveryRoomFromJobText(jobText, fallbackRoom) {
   const fallback = String(fallbackRoom || "").trim();
@@ -3675,6 +3689,7 @@ export {
   findValidAccept,
   foldPayeeDeal,
   isSuccessfulTrackEntry,
+  latestDeliveryBeforeReveal,
   listMyPaperActivity,
   listRecentAcceptedPayerDeals,
   listSafePaperOffers,

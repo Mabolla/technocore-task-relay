@@ -122,6 +122,8 @@ test("renders a verified tclk track record with lifecycle sequence numbers", () 
   assert.match(source, /const savedByKey = new Map\(savedRecords\.map/);
   assert.match(source, /const rememberedExternalRoom = \[rememberedPayeeDeal\?\.deliveryRoom, entry\.deliveryRoom\]/);
   assert.match(source, /resolveDeliveryRoom\(entry\.jobText \|\| "", entry\.room, rememberedExternalRoom\)/);
+  assert.match(source, /latestDeliveryBeforeReveal\(deliveries/);
+  assert.match(source, /revealTs: deal\.times\?\.reveal/);
   assert.match(source, /verified current or locally retained tclk record/);
 });
 

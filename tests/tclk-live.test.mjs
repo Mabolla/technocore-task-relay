@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeAccept, generateHashLock, makeOffer, verifySecret } from "@flop-labs/tclk";
-import { JOB_TEMPLATES, OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, deliveryRoomFromJobText, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, makeSimpleVerificationOffer, resolveDeliveryRoom, reviewJobSpec, summarizeDealActivity, verifyBoundJobSpec, verifyExactSignedTextRecord } from "../src/tclk-browser-entry.mjs";
+import { JOB_TEMPLATES, OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, deliveryRoomFromJobText, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, latestDeliveryBeforeReveal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, makeSimpleVerificationOffer, resolveDeliveryRoom, reviewJobSpec, summarizeDealActivity, verifyBoundJobSpec, verifyExactSignedTextRecord } from "../src/tclk-browser-entry.mjs";
 
 const payer = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -96,6 +96,23 @@ test("uses an explicit signed external delivery room while keeping normal jobs i
   const externalRecord = { ...(await record(payeeAgent, "agentic-crypto-research", text, String(now + 1), new Date(now + 1).toISOString())), seq: 88 };
   assert.deepEqual((await listSignedDeliveries({ messages: [externalRecord] }, accept, "agentic-crypto-research")).map((entry) => entry.seq), [88]);
   assert.deepEqual(await listSignedDeliveries({ messages: [externalRecord] }, accept), []);
+});
+
+test("orders cross-room delivery and reveal by timestamp instead of unrelated sequence numbers", () => {
+  const delivery = { seq: 16, ts: "2026-09-05T00:37:00.831Z", text: "valid external delivery" };
+  const selected = latestDeliveryBeforeReveal([delivery], {
+    sameRoom: false,
+    revealSeq: 3,
+    revealTs: "2026-09-05T00:40:41.867Z",
+    claimByMs: Date.parse("2026-09-05T01:00:00.000Z"),
+  });
+  assert.equal(selected, delivery);
+  assert.equal(latestDeliveryBeforeReveal([{ ...delivery, ts: "2026-09-05T00:41:00.000Z" }], {
+    sameRoom: false, revealSeq: 3, revealTs: "2026-09-05T00:40:41.867Z",
+  }), null);
+  assert.equal(latestDeliveryBeforeReveal([delivery], {
+    sameRoom: true, revealSeq: 3, revealTs: "2026-09-05T00:40:41.867Z",
+  }), null);
 });
 
 test("builds and verifies an explicit DID-signed payer FAIL review", async () => {
