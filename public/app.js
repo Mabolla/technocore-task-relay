@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, deliveryRoomFromJobText, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, latestDeliveryBeforeReveal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, resolveDeliveryRoom, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord, verifyExactSignedTextRecord } from "./tclk-official.js?v=objective-validator-1";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, deliveryRoomFromJobText, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findSignedPayerFailReview, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, latestDeliveryBeforeReveal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, resolveDeliveryRoom, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord, verifyExactSignedTextRecord } from "./tclk-official.js?v=manual-fail-history-1";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -952,6 +952,13 @@ function payerNoDeliveryReview(deal) {
 }
 
 async function inspectPayerFailReview(deal, roomPayload) {
+  const signed = await findSignedPayerFailReview(roomPayload, deal.offer, deal.accept, Number(deal.deliverySeq), deal.lock.room);
+  if (signed) {
+    deal.failReviewSeq = signed.seq;
+    deal.failReviewVerifiedAt = new Date().toISOString();
+    deal.autoSettleStatus = `DELIVERY REJECTED · FAIL REVIEW #${signed.seq ?? "?"}`;
+    return signed;
+  }
   if (!deliveryFailureReviewAllowed(deal)) {
     delete deal.failReviewSeq;
     delete deal.failReviewVerifiedAt;
@@ -2309,14 +2316,8 @@ async function syncTrackRecord({ announce = true } = {}) {
         const saved = readPayerDeals()[entry.contract];
         const humanReview = deliveryNeedsHumanReview(evaluation);
         const manuallyApproved = humanReview && String(saved?.manualDeliveryApprovedSeq) === String(entry.deliverySeq);
-        const manuallyRejected = humanReview && String(saved?.manualDeliveryRejectedSeq) === String(entry.deliverySeq);
-        const failedReview = (!evaluation.ok && !humanReview) || manuallyRejected
-          ? makePayerDeliveryReview(entry.offer, entry.accept, entry.offer.from, Number(entry.deliverySeq), "FAIL", manuallyRejected
-            ? "Manual review: delivery does not satisfy the custom job requirements"
-            : evaluation.reason)
-          : null;
-        const verifiedFailure = failedReview && roomPayload
-          ? await verifyExactSignedTextRecord(roomPayload, failedReview.line, entry.offer.from, failedReview.room)
+        const verifiedFailure = roomPayload
+          ? await findSignedPayerFailReview(roomPayload, entry.offer, entry.accept, Number(entry.deliverySeq), entry.room)
           : null;
         entry.deliveryRejected = Boolean(verifiedFailure);
         entry.seqs.review = verifiedFailure?.seq ?? entry.seqs.review;
