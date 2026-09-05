@@ -179,6 +179,18 @@ export async function verifyExactSignedTextRecord(raw, expectedText, from, room)
   return null;
 }
 
+export async function findSignedPayerFailReview(raw, offer, accept, deliverySeq, room = dealRoom(accept.contract)) {
+  if (accept.ref !== offer.id || !Number.isInteger(Number(deliverySeq)) || Number(deliverySeq) < 1) return null;
+  const prefix = `review ${offer.id.slice(0, 18)} contract ${accept.contract.slice(0, 18)} payee ${accept.from.slice(-8)} FAIL 0 — signed delivery #${Number(deliverySeq)}: `;
+  for (const record of records(raw)) {
+    if (record.from !== offer.from || !String(record.text || "").startsWith(prefix)) continue;
+    const reason = String(record.text).slice(prefix.length).trim();
+    if (reason.length < 3 || reason.length > 240) continue;
+    if (await validTransportSignature(record, room)) return { seq: record.seq ?? null, record };
+  }
+  return null;
+}
+
 function recordTime(record, fallback) {
   return Number.isFinite(Date.parse(record.ts)) ? Date.parse(record.ts) : fallback;
 }
