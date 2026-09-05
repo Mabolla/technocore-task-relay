@@ -931,8 +931,20 @@ function deterministicDeliveryFailure(deal) {
   return Boolean(deal?.deliverySeq != null && deal?.deliveryEvaluation && !deal.deliveryEvaluation.ok && !deal.deliveryReviewAllowed);
 }
 
+function manualDeliveryFailure(deal) {
+  return Boolean(deal?.deliveryReviewAllowed && deal?.deliverySeq != null
+    && String(deal.manualDeliveryRejectedSeq) === String(deal.deliverySeq));
+}
+
+function deliveryFailureReviewAllowed(deal) {
+  return deterministicDeliveryFailure(deal) || manualDeliveryFailure(deal);
+}
+
 function payerFailReview(deal) {
-  return makePayerDeliveryReview(deal.offer, deal.accept, deal.offer.from, Number(deal.deliverySeq), "FAIL", deal.deliveryEvaluation.reason);
+  const reason = manualDeliveryFailure(deal)
+    ? "Manual review: delivery does not satisfy the custom job requirements"
+    : deal.deliveryEvaluation.reason;
+  return makePayerDeliveryReview(deal.offer, deal.accept, deal.offer.from, Number(deal.deliverySeq), "FAIL", reason);
 }
 
 function payerNoDeliveryReview(deal) {
@@ -940,7 +952,7 @@ function payerNoDeliveryReview(deal) {
 }
 
 async function inspectPayerFailReview(deal, roomPayload) {
-  if (!deterministicDeliveryFailure(deal)) {
+  if (!deliveryFailureReviewAllowed(deal)) {
     delete deal.failReviewSeq;
     delete deal.failReviewVerifiedAt;
     return null;
@@ -1161,7 +1173,8 @@ function renderPayerDeal() {
   const terminal = refundedTerminal || (claimedTerminal && claimedDeliveryApproved(deal));
   $("#refund-payer-deal").disabled = !(deal?.state === "locked" && deal?.railState === "locked" && Date.now() >= deal.offer.refundAfterMs);
   $("#publish-payer-receipt").disabled = !terminal;
-  $("#publish-payer-fail-review").disabled = !(claimedTerminal && deterministicDeliveryFailure(deal) && !deal.failReviewVerifiedAt);
+  const humanRejectable = deal?.deliveryReviewAllowed && deal?.deliverySeq != null && !claimedDeliveryApproved(deal);
+  $("#publish-payer-fail-review").disabled = !(claimedTerminal && (deterministicDeliveryFailure(deal) || humanRejectable) && !deal.failReviewVerifiedAt);
   $("#publish-payer-no-delivery-review").disabled = !(claimedTerminal && deal.deliverySeq == null && !deal.noDeliveryReviewVerifiedAt);
   const deliveryStatus = $("#payer-delivery-status");
   const approveDelivery = $("#approve-payer-delivery");
@@ -1230,14 +1243,20 @@ $("#approve-payer-delivery")?.addEventListener("change", (event) => {
 
 $("#publish-payer-fail-review")?.addEventListener("click", async () => {
   const identity = readIdentity(); const deal = readPayerDeal();
-  if (!identity || identity.did !== deal?.offer?.from || deal?.state !== "claimed" || deal?.railState !== "claimed" || !deterministicDeliveryFailure(deal)) return;
+  const humanRejectable = deal?.deliveryReviewAllowed && deal?.deliverySeq != null && !claimedDeliveryApproved(deal);
+  if (!identity || identity.did !== deal?.offer?.from || deal?.state !== "claimed" || deal?.railState !== "claimed" || !(deterministicDeliveryFailure(deal) || humanRejectable)) return;
   try {
     const response = await fetch(`https://technocore.chat/r/${deal.lock.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
     if (!response.ok) throw new Error(`Deal room read failed (${response.status})`);
     const roomPayload = await response.json();
     const folded = await foldPayeeDeal(roomPayload, deal.offer, deal.accept);
     await inspectSignedPayerDelivery(deal, roomPayload, folded);
-    if (!deterministicDeliveryFailure(deal)) throw new Error("The selected delivery no longer has a deterministic failure");
+    const refreshedHumanRejectable = deal.deliveryReviewAllowed && deal.deliverySeq != null && !claimedDeliveryApproved(deal);
+    if (!(deterministicDeliveryFailure(deal) || refreshedHumanRejectable)) throw new Error("The selected delivery no longer qualifies for rejection");
+    if (refreshedHumanRejectable) {
+      deal.manualDeliveryRejectedSeq = deal.deliverySeq;
+      delete deal.manualDeliveryApprovedSeq;
+    }
     const review = payerFailReview(deal);
     const existing = await inspectPayerFailReview(deal, roomPayload);
     if (existing) {
@@ -1245,7 +1264,7 @@ $("#publish-payer-fail-review")?.addEventListener("click", async () => {
       notice(`Signed FAIL review already exists at seq #${existing.seq ?? "?"}; no duplicate was published`);
       return;
     }
-    if (!window.confirm(`Publish this DID-signed payer rejection?\n\n${review.line}\n\nThis records a deterministic delivery failure and will not issue a PASS receipt.`)) return;
+    if (!window.confirm(`Publish this DID-signed payer rejection?\n\n${review.line}\n\nThis records that the delivery failed review and will not issue a PASS receipt.`)) return;
     const nonce = Date.now(); const signature = await sign(identity, review.room, nonce, review.line);
     window.open(signedUrl(review.room, identity, signature, nonce, review.line), "_blank", "noopener,noreferrer");
     deal.failReviewSubmittedAt = new Date().toISOString();
