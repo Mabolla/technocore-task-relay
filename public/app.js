@@ -2118,8 +2118,13 @@ async function syncTrackRecord({ announce = true } = {}) {
   $("#track-sync-status").textContent = "Reading verified Technocore history…";
   try {
     const currentActivity = await listMyPaperActivity(await readOfferHistory(), identity.did);
-    const activityByKey = new Map(currentActivity.map((entry) => [trackKey(entry), entry]));
-    for (const saved of readTrackRecords()) {
+    const savedRecords = readTrackRecords();
+    const savedByKey = new Map(savedRecords.map((entry) => [trackKey(entry), entry]));
+    const activityByKey = new Map(currentActivity.map((entry) => {
+      const saved = savedByKey.get(trackKey(entry));
+      return [trackKey(entry), { ...saved, ...entry, seqs: { ...saved?.seqs, ...entry.seqs } }];
+    }));
+    for (const saved of savedRecords) {
       if (saved?.offer && saved?.accept && !activityByKey.has(trackKey(saved))) activityByKey.set(trackKey(saved), { ...saved });
     }
     const activity = [...activityByKey.values()];
@@ -2127,6 +2132,7 @@ async function syncTrackRecord({ announce = true } = {}) {
       let spec = null;
       const rememberedPayeeDeal = entry.contract ? readPayeeDeals()[entry.contract] : null;
       entry.jobText ||= rememberedPayeeDeal?.jobSnapshot?.text || null;
+      entry.deliveryRoom ||= rememberedPayeeDeal?.deliveryRoom || null;
       const jobUrl = contextUrl(entry.offer.job.context);
       if (jobUrl.startsWith("https://technocore.chat/")) {
         const specResponse = await fetch(`${jobUrl}?n=${Date.now()}`);
@@ -2142,7 +2148,9 @@ async function syncTrackRecord({ announce = true } = {}) {
           roomPayload = await roomResponse.json();
           const deal = await summarizeDealActivity(roomPayload, entry.offer, entry.accept);
           entry.status = deal.status; entry.seqs = { ...entry.seqs, ...deal.seqs };
-          const deliveryRoom = deliveryRoomFromJobText(entry.jobText || "", entry.room);
+          const deliveryRoom = entry.deliveryRoom
+            ? deliveryRoomFromJobText("", entry.deliveryRoom)
+            : deliveryRoomFromJobText(entry.jobText || "", entry.room);
           let deliveryPayload = roomPayload;
           if (deliveryRoom !== entry.room) {
             const deliveryResponse = await fetch(`https://technocore.chat/r/${deliveryRoom}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" } });
