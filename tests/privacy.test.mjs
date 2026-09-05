@@ -344,6 +344,14 @@ test("deterministic delivery failures can publish one explicit signed FAIL revie
   assert.match(source, /CLAIMED · DELIVERY REJECTED/);
 });
 
+test("human-reviewed custom deliveries can be rejected with a signed FAIL review", () => {
+  assert.match(source, /function manualDeliveryFailure\(deal\)/);
+  assert.match(source, /manualDeliveryRejectedSeq/);
+  assert.match(source, /Manual review: delivery does not satisfy the custom job requirements/);
+  assert.match(source, /deterministicDeliveryFailure\(deal\) \|\| humanRejectable/);
+  assert.match(source, /delivery failed review and will not issue a PASS receipt/);
+});
+
 test("claimed deals without a signed delivery can publish one explicit signed FAIL review", () => {
   assert.match(source, /SIGN NO-DELIVERY FAIL REVIEW/);
   assert.match(source, /makePayerNoDeliveryReview/);
