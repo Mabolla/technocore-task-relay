@@ -358,4 +358,6 @@ test("refunds an expired locked payer deal before issuing its terminal receipt",
   assert.match(source, /expectedPaperRefund\(deal\.offer, deal\.accept\)/);
   assert.match(source, /folded\.state\.status !== "locked"/);
   assert.match(source, /SIGN TERMINAL RECEIPT/);
+  assert.match(source, /\["claimed", "refunded"\]\.includes\(deal\.status\)/);
+  assert.match(source, /makePayeeReceipt\(entry\.accept, entry\.offer\.from, payerReceiptOutcome\)/);
 });

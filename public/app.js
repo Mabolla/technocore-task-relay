@@ -2193,8 +2193,11 @@ async function syncTrackRecord({ announce = true } = {}) {
           }) : null;
           entry.deliverySeq = delivery?.seq ?? null;
           entry.deliveryText = delivery?.text ?? null;
-          const expectedPayerReceipt = makePayeeReceipt(entry.accept, entry.offer.from, "claimed");
-          const payerReceipt = deal.status === "claimed"
+          const payerReceiptOutcome = ["claimed", "refunded"].includes(deal.status) ? deal.status : null;
+          const expectedPayerReceipt = payerReceiptOutcome
+            ? makePayeeReceipt(entry.accept, entry.offer.from, payerReceiptOutcome)
+            : null;
+          const payerReceipt = expectedPayerReceipt
             ? await verifyExactFrameRecord(roomPayload, expectedPayerReceipt.frame, expectedPayerReceipt.room)
             : null;
           entry.payerReceiptSeq = payerReceipt?.seq ?? null;
