@@ -1897,9 +1897,20 @@ $("#payee-auto-hunter-stop").addEventListener("click", () => {
 async function acceptPaperOffer(offer, jobSnapshot) {
   const identity = readIdentity(); if (!identity) return;
   if (activePayeeDeals().length >= MAX_ACTIVE_PAYEE_DEALS) { notice(`Payee queue is full (${MAX_ACTIVE_PAYEE_DEALS}/${MAX_ACTIVE_PAYEE_DEALS})`); return; }
-  const existing = readPayeeDeal();
-  if (existing && await archiveCompletedPayeeDeal(existing, identity)) notice("Previous completed deal archived locally; continuing with the new job");
-  if (readPayeeDeal()) { notice("Finish the active payee deal before accepting another"); return; }
+  let existing = readPayeeDeal();
+  if (existing && await archiveCompletedPayeeDeal(existing, identity)) {
+    existing = null;
+    notice("Previous completed deal archived locally; continuing with the new job");
+  }
+  if (existing?.acceptSeq) {
+    rememberPayeeDeal(existing);
+    localStorage.removeItem(PAYEE_DEAL_KEY);
+    resetPayeeUi();
+    renderPayeeDealQueue();
+    notice(`Offer #${existing.offerSeq ?? "?"} parked safely in the payee queue; continuing with the selected job`);
+    existing = null;
+  }
+  if (existing) { notice("Finish or discard the unverified payee deal before accepting another"); return; }
   const prepared = makePayeeAcceptance(offer, identity.did);
   if (!window.confirm(`Accept this exact PAPER job as payee?\n\nJob: ${offer.job.id}\nPayer: ${offer.from}\nContract: ${prepared.contract}\n\nThe hash-lock secret will be encrypted locally and never sent before reveal.`)) return;
   const vaultPassword = window.prompt("Create a separate deal-vault password (minimum 12 characters). It is not stored and cannot be recovered.");
