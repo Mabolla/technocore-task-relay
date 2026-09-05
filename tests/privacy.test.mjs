@@ -350,6 +350,8 @@ test("human-reviewed custom deliveries can be rejected with a signed FAIL review
   assert.match(source, /Manual review: delivery does not satisfy the custom job requirements/);
   assert.match(source, /deterministicDeliveryFailure\(deal\) \|\| humanRejectable/);
   assert.match(source, /delivery failed review and will not issue a PASS receipt/);
+  assert.match(source, /const manuallyRejected = humanReview && String\(saved\?\.manualDeliveryRejectedSeq\) === String\(entry\.deliverySeq\)/);
+  assert.match(source, /\(!evaluation\.ok && !humanReview\) \|\| manuallyRejected/);
 });
 
 test("claimed deals without a signed delivery can publish one explicit signed FAIL review", () => {
