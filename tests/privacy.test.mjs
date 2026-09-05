@@ -256,7 +256,7 @@ test("restores and advances an active payer deal after refresh", () => {
   assert.match(source, /VERIFY LOCK \/ CHECK RESULT/);
   assert.match(source, /foldPayeeDeal\(await roomResponse\.json\(\), deal\.offer, deal\.accept\)/);
   assert.match(source, /SIGN CLAIMED RECEIPT/);
-  assert.match(source, /Payer receipt opened for Technocore confirmation/);
+  assert.match(source, /Terminal payer receipt verified at seq/);
 });
 
 test("does not report an opened signed-lock tab as a verified lock", () => {
@@ -317,6 +317,11 @@ test("manual payer settlement requires a signed delivery and blocks duplicate re
   assert.match(source, /no approved signed delivery exists before reveal/);
   assert.match(source, /Terminal receipt already exists at seq/);
   assert.match(source, /no duplicate was published/);
+  assert.match(source, /publishVerifiedPayerReceipt\(deal, roomPayload, deal\.state\)/);
+  assert.match(source, /Signing and publishing the terminal payer receipt/);
+  assert.match(source, /Terminal payer receipt verified at seq/);
+  const manualReceiptHandler = source.match(/\$\("#publish-payer-receipt"\)\.addEventListener\("click", async \(\) => \{([\s\S]*?)\n\}\);/)?.[1] || "";
+  assert.doesNotMatch(manualReceiptHandler, /window\.open\(/);
   assert.match(source, /Approve this exact signed delivery manually/);
   assert.match(source, /\$\("#approve-payer-delivery"\)\?\.addEventListener/);
 });

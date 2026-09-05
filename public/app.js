@@ -1627,33 +1627,42 @@ $("#publish-payer-receipt").addEventListener("click", async () => {
   const identity = readIdentity(); const deal = readPayerDeal();
   const terminal = (deal?.state === "claimed" && deal?.railState === "claimed" && claimedDeliveryApproved(deal)) || (deal?.state === "refunded" && deal?.railState === "refunded");
   if (!identity || !terminal) return;
-  const receipt = makePayeeReceipt(deal.accept, identity.did, deal.state);
-  const roomResponse = await fetch(`https://technocore.chat/r/${receipt.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
-  if (!roomResponse.ok) { notice(`Receipt check blocked: deal room read failed (${roomResponse.status})`); return; }
-  const roomPayload = await roomResponse.json();
-  const existing = await verifyExactFrameRecord(roomPayload, receipt.frame, receipt.room);
-  if (existing) {
-    deal.receiptSeq = existing.seq;
-    deal.receiptVerifiedAt = new Date().toISOString();
+  const button = $("#publish-payer-receipt");
+  button.disabled = true;
+  try {
+    const receipt = makePayeeReceipt(deal.accept, identity.did, deal.state);
+    const roomResponse = await fetch(`https://technocore.chat/r/${receipt.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+    if (!roomResponse.ok) throw new Error(`Deal room read failed (${roomResponse.status})`);
+    const roomPayload = await roomResponse.json();
+    const existing = await verifyExactFrameRecord(roomPayload, receipt.frame, receipt.room);
+    if (existing) {
+      deal.receiptSeq = existing.seq;
+      deal.receiptVerifiedAt = new Date().toISOString();
+      saveActivePayerDeal(deal);
+      notice(`Terminal receipt already exists at seq #${existing.seq ?? "?"}; no duplicate was published`);
+      return;
+    }
+    if (deal.state === "claimed") {
+      const folded = await foldPayeeDeal(roomPayload, deal.offer, deal.accept);
+      await inspectSignedPayerDelivery(deal, roomPayload, folded);
+      saveActivePayerDeal(deal);
+      if (!claimedDeliveryApproved(deal)) throw new Error("no approved signed delivery exists before reveal");
+    }
+    if (!window.confirm(`Archive this terminal payer deal with a signed ${deal.state} receipt?\n\n${receipt.line}`)) return;
+    notice("Signing and publishing the terminal payer receipt…");
+    const verified = await publishVerifiedPayerReceipt(deal, roomPayload, deal.state);
+    if (verified) {
+      notice(`Terminal payer receipt verified at seq #${deal.receiptSeq ?? "?"}`);
+      void syncTrackRecord({ announce: false });
+    } else {
+      notice("Technocore accepted the payer receipt; verification is still propagating. Press once more after a few seconds to verify it without duplicating.");
+    }
+  } catch (error) {
+    notice(`Terminal receipt was not published: ${error.message}`);
+  } finally {
     saveActivePayerDeal(deal);
     renderPayerDeal();
-    notice(`Terminal receipt already exists at seq #${existing.seq ?? "?"}; no duplicate was published`);
-    return;
   }
-  if (deal.state === "claimed") {
-    const folded = await foldPayeeDeal(roomPayload, deal.offer, deal.accept);
-    await inspectSignedPayerDelivery(deal, roomPayload, folded);
-    saveActivePayerDeal(deal);
-    renderPayerDeal();
-    if (!claimedDeliveryApproved(deal)) { notice("Receipt blocked: no approved signed delivery exists before reveal"); return; }
-  }
-  if (!window.confirm(`Archive this terminal payer deal with a signed ${deal.state} receipt?\n\n${receipt.line}`)) return;
-  const nonce = Date.now(); const signature = await sign(identity, receipt.room, nonce, receipt.line);
-  window.open(signedUrl(receipt.room, identity, signature, nonce, receipt.line), "_blank", "noopener,noreferrer");
-  deal.receiptSubmittedAt = new Date().toISOString();
-  saveActivePayerDeal(deal);
-  renderPayerDeal();
-  notice("Payer receipt opened for Technocore confirmation");
 });
 
 $("#refund-payer-deal").addEventListener("click", async () => {
