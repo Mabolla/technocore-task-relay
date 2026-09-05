@@ -2307,9 +2307,13 @@ async function syncTrackRecord({ announce = true } = {}) {
       if (spec && entry.deliveryText) {
         const evaluation = evaluateObjectiveDelivery(spec.text, entry.deliveryText, entry.offer);
         const saved = readPayerDeals()[entry.contract];
-        const manuallyApproved = deliveryNeedsHumanReview(evaluation) && String(saved?.manualDeliveryApprovedSeq) === String(entry.deliverySeq);
-        const failedReview = !evaluation.ok && !deliveryNeedsHumanReview(evaluation)
-          ? makePayerDeliveryReview(entry.offer, entry.accept, entry.offer.from, Number(entry.deliverySeq), "FAIL", evaluation.reason)
+        const humanReview = deliveryNeedsHumanReview(evaluation);
+        const manuallyApproved = humanReview && String(saved?.manualDeliveryApprovedSeq) === String(entry.deliverySeq);
+        const manuallyRejected = humanReview && String(saved?.manualDeliveryRejectedSeq) === String(entry.deliverySeq);
+        const failedReview = (!evaluation.ok && !humanReview) || manuallyRejected
+          ? makePayerDeliveryReview(entry.offer, entry.accept, entry.offer.from, Number(entry.deliverySeq), "FAIL", manuallyRejected
+            ? "Manual review: delivery does not satisfy the custom job requirements"
+            : evaluation.reason)
           : null;
         const verifiedFailure = failedReview && roomPayload
           ? await verifyExactSignedTextRecord(roomPayload, failedReview.line, entry.offer.from, failedReview.room)
