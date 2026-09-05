@@ -351,6 +351,7 @@ test("human-reviewed custom deliveries can be rejected with a signed FAIL review
   assert.match(source, /deterministicDeliveryFailure\(deal\) \|\| humanRejectable/);
   assert.match(source, /delivery failed review and will not issue a PASS receipt/);
   assert.match(source, /findSignedPayerFailReview\(roomPayload, entry\.offer, entry\.accept/);
+  assert.match(source, /const contractBinding = ` contract /);
 });
 
 test("claimed deals without a signed delivery can publish one explicit signed FAIL review", () => {
