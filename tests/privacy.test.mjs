@@ -282,6 +282,14 @@ test("keeps expired locked payer deals resumable for refund", () => {
   assert.match(source, /resume\.addEventListener\("click", \(\) => resumePayerDeal\(entry\)\)/);
 });
 
+test("reconciles terminal and expired no-lock payee jobs out of the active queue", () => {
+  assert.match(source, /async function reconcilePayeeDealQueue\(\)/);
+  assert.match(source, /\["refunded", "cancelled"\]\.includes\(folded\.state\.status\)/);
+  assert.match(source, /verifyExactFrameRecord\(payload, receipt\.frame, receipt\.room\)/);
+  assert.match(source, /const deals = activePayeeDeals\(\)\.sort/);
+  assert.match(source, /setInterval\(\(\) => \{ void reconcilePayeeDealQueue\(\); \}, 30_000\)/);
+});
+
 test("auto-publishes saved payer locks only after a fresh server-created room event", () => {
   assert.match(source, /PAYER LOCK AUTO-PUBLISH · LOCAL KEY ONLY/);
   assert.match(source, /ARM PAYER AUTO-PUBLISH/);
