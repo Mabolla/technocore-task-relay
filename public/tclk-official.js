@@ -3592,8 +3592,7 @@ function evaluateObjectiveDelivery(jobText, deliveryText, offer) {
 }
 function isSuccessfulTrackEntry(entry) {
   if (entry?.status !== "claimed" || entry.deliveryVerified !== true) return false;
-  if (entry.role === "payer") return entry.payerReceiptVerified === true;
-  return Boolean(entry.seqs?.receipt);
+  return entry.payerReceiptVerified === true;
 }
 function expectedPaperLock(offer, accept) {
   const note = paperNote(accept.contract);

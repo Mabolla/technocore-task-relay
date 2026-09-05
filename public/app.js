@@ -2028,7 +2028,7 @@ function statusLabel(entry) {
   if (successfulTrackEntry(entry)) return "SUCCESSFUL · DELIVERY VERIFIED";
   if (entry.noDeliveryRejected) return "CLAIMED · NO DELIVERY · REJECTED";
   if (entry.deliveryRejected) return "CLAIMED · DELIVERY REJECTED";
-  if (entry.role === "payer" && entry.status === "claimed" && entry.deliveryVerified === true && !entry.payerReceiptVerified) return "CLAIMED · DELIVERY VERIFIED · PAYER RECEIPT PENDING";
+  if (entry.status === "claimed" && entry.deliveryVerified === true && !entry.payerReceiptVerified) return "CLAIMED · DELIVERY VERIFIED · PAYER RECEIPT PENDING";
   if (entry.status === "claimed" && entry.seqs?.receipt && entry.deliverySeq == null) return "CLAIMED · RECEIPT PRESENT · NO DELIVERY";
   if (entry.status === "claimed" && entry.seqs?.receipt) return "CLAIMED · DELIVERY UNVERIFIED";
   if (entry.status === "claimed") return "CLAIMED · RECEIPT PENDING";

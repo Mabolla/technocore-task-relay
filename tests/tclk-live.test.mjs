@@ -59,11 +59,13 @@ test("auto-settle accepts only a signed delivery that passes a supported determi
   assert.match(evaluateObjectiveDelivery("Custom legacy task", passing, prepared.offer).reason, /no supported deterministic validator/);
 });
 
-test("payer track success requires its own verified terminal receipt", () => {
+test("track success requires the payer's verified terminal receipt", () => {
   const payerEntry = { role: "payer", status: "claimed", deliveryVerified: true, seqs: { receipt: 4 } };
   assert.equal(isSuccessfulTrackEntry(payerEntry), false);
   assert.equal(isSuccessfulTrackEntry({ ...payerEntry, payerReceiptVerified: true, payerReceiptSeq: 5 }), true);
-  assert.equal(isSuccessfulTrackEntry({ role: "payee", status: "claimed", deliveryVerified: true, seqs: { receipt: 4 } }), true);
+  const payeeEntry = { role: "payee", status: "claimed", deliveryVerified: true, seqs: { receipt: 4 } };
+  assert.equal(isSuccessfulTrackEntry(payeeEntry), false);
+  assert.equal(isSuccessfulTrackEntry({ ...payeeEntry, payerReceiptVerified: true, payerReceiptSeq: 5 }), true);
 });
 
 test("lists only non-frame delivery text signed by the accepted payee", async () => {
