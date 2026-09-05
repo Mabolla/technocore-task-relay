@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, deliveryRoomFromJobText, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findSignedPayerFailReview, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, latestDeliveryBeforeReveal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, resolveDeliveryRoom, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord, verifyExactSignedTextRecord } from "./tclk-official.js?v=manual-fail-history-2";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, deliveryRoomFromJobText, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findSignedPayerFailReview, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, latestDeliveryBeforeReveal, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, resolveDeliveryRoom, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord, verifyExactSignedTextRecord } from "./tclk-official.js?v=manual-fail-history-3";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -2303,6 +2303,12 @@ async function syncTrackRecord({ announce = true } = {}) {
           entry.deliveryVerified = Boolean(delivery && payerReceipt);
           entry.deliveryRejected = false;
           entry.noDeliveryRejected = false;
+          if (delivery) {
+            const verifiedFailure = await findSignedPayerFailReview(roomPayload, entry.offer, entry.accept, Number(entry.deliverySeq), entry.room);
+            entry.deliveryRejected = Boolean(verifiedFailure);
+            entry.seqs.review = verifiedFailure?.seq ?? entry.seqs.review;
+            if (entry.deliveryRejected) entry.deliveryVerified = false;
+          }
           if (deal.status === "claimed" && !delivery) {
             const noDeliveryReview = makePayerNoDeliveryReview(entry.offer, entry.accept, entry.offer.from);
             const verifiedNoDeliveryFailure = await verifyExactSignedTextRecord(roomPayload, noDeliveryReview.line, entry.offer.from, noDeliveryReview.room);
@@ -2316,11 +2322,6 @@ async function syncTrackRecord({ announce = true } = {}) {
         const saved = readPayerDeals()[entry.contract];
         const humanReview = deliveryNeedsHumanReview(evaluation);
         const manuallyApproved = humanReview && String(saved?.manualDeliveryApprovedSeq) === String(entry.deliverySeq);
-        const verifiedFailure = roomPayload
-          ? await findSignedPayerFailReview(roomPayload, entry.offer, entry.accept, Number(entry.deliverySeq), entry.room)
-          : null;
-        entry.deliveryRejected = Boolean(verifiedFailure);
-        entry.seqs.review = verifiedFailure?.seq ?? entry.seqs.review;
         entry.deliveryVerified = !entry.deliveryRejected && (entry.payerReceiptVerified || evaluation.ok || manuallyApproved);
         entry.deliveryEvaluationReason = evaluation.reason;
       }
