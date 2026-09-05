@@ -942,8 +942,9 @@ function deliveryFailureReviewAllowed(deal) {
 
 function payerFailReview(deal) {
   const reason = manualDeliveryFailure(deal)
-    ? "Manual review: delivery does not satisfy the custom job requirements"
+    ? clean(deal.manualDeliveryRejectionReason || "")
     : deal.deliveryEvaluation.reason;
+  if (reason.length < 3 || reason.length > 240) throw new Error("A specific 3-240 character rejection reason is required");
   return makePayerDeliveryReview(deal.offer, deal.accept, deal.offer.from, Number(deal.deliverySeq), "FAIL", reason);
 }
 
@@ -1181,7 +1182,14 @@ function renderPayerDeal() {
   $("#refund-payer-deal").disabled = !(deal?.state === "locked" && deal?.railState === "locked" && Date.now() >= deal.offer.refundAfterMs);
   $("#publish-payer-receipt").disabled = !terminal;
   const humanRejectable = deal?.deliveryReviewAllowed && deal?.deliverySeq != null && !claimedDeliveryApproved(deal);
-  $("#publish-payer-fail-review").disabled = !(claimedTerminal && (deterministicDeliveryFailure(deal) || humanRejectable) && !deal.failReviewVerifiedAt);
+  const failReason = $("#payer-fail-reason");
+  const specificReason = clean(deal?.manualDeliveryRejectionReason || "");
+  if (failReason) {
+    if (document.activeElement !== failReason) failReason.value = specificReason;
+    failReason.disabled = !(claimedTerminal && humanRejectable && !deal.failReviewVerifiedAt);
+  }
+  const validSpecificReason = specificReason.length >= 3 && specificReason.length <= 240;
+  $("#publish-payer-fail-review").disabled = !(claimedTerminal && (deterministicDeliveryFailure(deal) || (humanRejectable && validSpecificReason)) && !deal.failReviewVerifiedAt);
   $("#publish-payer-no-delivery-review").disabled = !(claimedTerminal && deal.deliverySeq == null && !deal.noDeliveryReviewVerifiedAt);
   const deliveryStatus = $("#payer-delivery-status");
   const approveDelivery = $("#approve-payer-delivery");
@@ -1248,6 +1256,15 @@ $("#approve-payer-delivery")?.addEventListener("change", (event) => {
   notice(`Signed delivery #${deal.deliverySeq} manually approved for this custom job`);
 });
 
+$("#payer-fail-reason")?.addEventListener("input", (event) => {
+  const deal = readPayerDeal();
+  if (!deal?.deliveryReviewAllowed || deal.deliverySeq == null) return;
+  deal.manualDeliveryRejectionReason = clean(event.target.value).slice(0, 240);
+  saveActivePayerDeal(deal);
+  const valid = deal.manualDeliveryRejectionReason.length >= 3;
+  $("#publish-payer-fail-review").disabled = !(deal.state === "claimed" && deal.railState === "claimed" && valid && !deal.failReviewVerifiedAt);
+});
+
 $("#publish-payer-fail-review")?.addEventListener("click", async () => {
   const identity = readIdentity(); const deal = readPayerDeal();
   const humanRejectable = deal?.deliveryReviewAllowed && deal?.deliverySeq != null && !claimedDeliveryApproved(deal);
@@ -1261,7 +1278,10 @@ $("#publish-payer-fail-review")?.addEventListener("click", async () => {
     const refreshedHumanRejectable = deal.deliveryReviewAllowed && deal.deliverySeq != null && !claimedDeliveryApproved(deal);
     if (!(deterministicDeliveryFailure(deal) || refreshedHumanRejectable)) throw new Error("The selected delivery no longer qualifies for rejection");
     if (refreshedHumanRejectable) {
+      const reason = clean($("#payer-fail-reason")?.value || deal.manualDeliveryRejectionReason || "");
+      if (reason.length < 3 || reason.length > 240) throw new Error("Enter a specific 3-240 character rejection reason");
       deal.manualDeliveryRejectedSeq = deal.deliverySeq;
+      deal.manualDeliveryRejectionReason = reason;
       delete deal.manualDeliveryApprovedSeq;
     }
     const review = payerFailReview(deal);
