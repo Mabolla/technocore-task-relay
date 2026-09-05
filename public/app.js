@@ -368,11 +368,23 @@ function renderPayeeAutoAccept() {
       : "OFF\nChoose a scanned job and press ARM AUTO-ACCEPT.";
 }
 
+function renderPayeeJobNote(deal = readPayeeDeal()) {
+  const output = $("#payee-job-note");
+  if (!output) return;
+  const text = clean(deal?.jobSnapshot?.text || "");
+  output.textContent = text
+    ? `Source: ${deal.offer?.job?.context || "saved snapshot"}\n\n${text}`
+    : deal
+      ? "Saved job note unavailable for this older local deal. Do not publish delivery or reveal until the exact job context is recovered."
+      : "No accepted job selected.";
+}
+
 function savePayeeDeal(deal) {
   localStorage.setItem(PAYEE_DEAL_KEY, JSON.stringify(deal));
   rememberPayeeDeal(deal);
   renderPayeeAutoAccept();
   renderPayeeDealQueue();
+  renderPayeeJobNote(deal);
 }
 
 function payeeQueueLabel(deal) {
@@ -1747,6 +1759,7 @@ function resetPayeeUi() {
   $("#claim-paper").disabled = true;
   $("#publish-receipt").disabled = true;
   $("#payee-status").textContent = "No offer accepted by this browser.";
+  renderPayeeJobNote();
 }
 
 function renderPayeeOffers(items) {
@@ -2521,6 +2534,7 @@ renderPayerAutoSettle();
 renderPayeeAutoAccept();
 if (readPayeeDeal()) rememberPayeeDeal(readPayeeDeal());
 renderPayeeDealQueue();
+renderPayeeJobNote();
 if (readPayeeAutoHunter().armed) {
   const staleHunter = readPayeeAutoHunter();
   localStorage.setItem(PAYEE_AUTO_HUNTER_KEY, JSON.stringify({

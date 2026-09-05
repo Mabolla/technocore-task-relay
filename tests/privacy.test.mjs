@@ -355,6 +355,10 @@ test("payee publishes and verifies a signed delivery before revealing", () => {
   assert.match(source, /readPayeeDeliveryRoom\(deal\)/);
   assert.match(source, /listSignedDeliveries\(deliveryPayload, deal\.accept, deliveryRoom\)/);
   assert.match(source, /sign\(identity, deliveryRoom, nonce, text\)/);
+  assert.match(source, /SAVED JOB NOTE · REVIEW BEFORE DELIVERY/);
+  assert.match(source, /function renderPayeeJobNote/);
+  assert.match(source, /deal\?\.jobSnapshot\?\.text/);
+  assert.match(source, /Do not publish delivery or reveal until the exact job context is recovered/);
 });
 
 test("refunds an expired locked payer deal before issuing its terminal receipt", () => {

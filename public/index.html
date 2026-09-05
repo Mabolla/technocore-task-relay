@@ -127,6 +127,7 @@ Choose a scanned job and press ARM AUTO-ACCEPT.</pre></section>
         <button id="payee-auto-accept-stop" type="button" disabled>STOP AUTO-ACCEPT</button>
         <section class="preview"><b>PAYEE DEAL QUEUE · MAX 3</b><div id="payee-deal-queue" class="cards empty">No accepted payee jobs in the local queue.</div></section>
         <section class="preview"><b>ACTIVE PAYEE DEAL</b><pre id="payee-status">No offer accepted by this browser.</pre></section>
+        <section class="preview"><b>SAVED JOB NOTE · REVIEW BEFORE DELIVERY</b><pre id="payee-job-note">No accepted job selected.</pre></section>
         <label>Signed job delivery<textarea id="payee-delivery" maxlength="2000" placeholder="Enter the exact completed result that the payer must verify." disabled></textarea></label>
         <button class="primary full-width" id="publish-payee-delivery" type="button" disabled>SIGN &amp; PUBLISH DELIVERY</button>
         <label class="confirm"><input id="work-complete" type="checkbox" disabled><span>I verified that my signed delivery is present in the required Technocore room and the payer's PaperRail lock is valid.</span></label>
@@ -170,6 +171,6 @@ Choose a scanned job and press ARM AUTO-ACCEPT.</pre></section>
       <button class="primary" type="submit">SIGN & PUBLISH →</button>
     </form>
   </dialog>
-  <script type="module" src="./app.js?v=payer-receipt-direct-publish-1"></script>
+  <script type="module" src="./app.js?v=payee-saved-job-note-1"></script>
 </body>
 </html>
