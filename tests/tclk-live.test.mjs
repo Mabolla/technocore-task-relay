@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeAccept, generateHashLock, makeOffer, verifySecret } from "@flop-labs/tclk";
-import { JOB_TEMPLATES, OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, makeSimpleVerificationOffer, reviewJobSpec, summarizeDealActivity, verifyBoundJobSpec, verifyExactSignedTextRecord } from "../src/tclk-browser-entry.mjs";
+import { JOB_TEMPLATES, OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, deliveryRoomFromJobText, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, makeSimpleVerificationOffer, reviewJobSpec, summarizeDealActivity, verifyBoundJobSpec, verifyExactSignedTextRecord } from "../src/tclk-browser-entry.mjs";
 
 const payer = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -76,6 +76,21 @@ test("lists only non-frame delivery text signed by the accepted payee", async ()
   const signedFrame = { ...(await record(payeeAgent, room, encodeFrame(reveal), String(now + 2), new Date(now + 2).toISOString())), seq: 3 };
   const found = await listSignedDeliveries({ messages: [delivery, signedFrame, { from: payeeAgent.did, text: "unsigned delivery" }] }, accept);
   assert.deepEqual(found.map((entry) => entry.seq), [2]);
+});
+
+test("uses an explicit signed external delivery room while keeping normal jobs in the deal room", async () => {
+  const fallback = "mb-p-tclk-0123456789abcdef";
+  const externalJob = "text deliverable: one paragraph posted SIGNED by the payee DID into /r/agentic-crypto-research before claimBy | then reveal in the deal room";
+  assert.equal(deliveryRoomFromJobText(externalJob, fallback), "agentic-crypto-research");
+  assert.equal(deliveryRoomFromJobText("Deliver 150-300 characters signed in the derived deal room.", fallback), fallback);
+
+  const now = Date.now(); const payerAgent = await signer(); const payeeAgent = await signer();
+  const offer = makeOffer({ from: payerAgent.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 60_000, claimByMs: now + 3_600_000, refundAfterMs: now + 7_200_000, job: { proto: "a2a", id: "external-delivery", context: "/kv/jobs/external-delivery" } });
+  const accept = makeAccept(offer, { from: payeeAgent.did, statement: generateHashLock().hash });
+  const text = "Current Aave v3 risk summary with oracle, threshold and bridge evidence.";
+  const externalRecord = { ...(await record(payeeAgent, "agentic-crypto-research", text, String(now + 1), new Date(now + 1).toISOString())), seq: 88 };
+  assert.deepEqual((await listSignedDeliveries({ messages: [externalRecord] }, accept, "agentic-crypto-research")).map((entry) => entry.seq), [88]);
+  assert.deepEqual(await listSignedDeliveries({ messages: [externalRecord] }, accept), []);
 });
 
 test("builds and verifies an explicit DID-signed payer FAIL review", async () => {

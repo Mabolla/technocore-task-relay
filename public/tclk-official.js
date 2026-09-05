@@ -3534,8 +3534,8 @@ async function foldPayeeDeal(raw, offer, accept, now = Date.now()) {
   }
   return { state, applied, room };
 }
-async function listSignedDeliveries(raw, accept) {
-  const room = dealRoom(accept.contract);
+async function listSignedDeliveries(raw, accept, deliveryRoom = dealRoom(accept.contract)) {
+  const room = deliveryRoom;
   const deliveries = [];
   for (const record of records(raw)) {
     if (record.from !== accept.from || tryDecodeFrame(record.text || "")) continue;
@@ -3545,6 +3545,13 @@ async function listSignedDeliveries(raw, accept) {
     deliveries.push({ seq: record.seq ?? null, ts: record.ts ?? null, text });
   }
   return deliveries.sort((left, right) => Number(left.seq || 0) - Number(right.seq || 0));
+}
+function deliveryRoomFromJobText(jobText, fallbackRoom) {
+  const fallback = String(fallbackRoom || "").trim();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?$/.test(fallback)) throw new Error("A valid fallback delivery room is required");
+  const text = String(jobText || "").replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, " ").replace(/\s+/g, " ").trim();
+  const match = text.match(/\b(?:post(?:ed)?|publish(?:ed)?|deliver(?:ed)?)\s+SIGNED\b[^|]{0,240}?\b(?:into|to)\s+\/r\/([a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?)(?=\s|[.,;:|)]|$)/i);
+  return match?.[1] || fallback;
 }
 function countMatches(text, expression) {
   return [...text.matchAll(expression)].length;
@@ -3653,6 +3660,7 @@ export {
   OFFER_ROOM,
   SIMPLE_VERIFICATION_JOB,
   classifyPaperRecord,
+  deliveryRoomFromJobText,
   encodeFrame,
   evaluateObjectiveDelivery,
   expectedPaperClaim,

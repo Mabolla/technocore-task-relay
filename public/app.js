@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord, verifyExactSignedTextRecord } from "./tclk-official.js?v=payer-receipt-track-3";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, deliveryRoomFromJobText, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord, verifyExactSignedTextRecord } from "./tclk-official.js?v=external-delivery-room-1";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -1697,6 +1697,18 @@ async function readOfferWindow(offerSeq) {
   for (const message of [...(windowPayload.messages || []), ...(tail.messages || [])]) merged.set(message.seq, message);
   return { messages: [...merged.values()].sort((left, right) => Number(left.seq) - Number(right.seq)) };
 }
+
+function payeeDeliveryRoom(deal) {
+  return deliveryRoomFromJobText(deal?.jobSnapshot?.text || "", deal?.room);
+}
+
+async function readPayeeDeliveryRoom(deal) {
+  const room = payeeDeliveryRoom(deal);
+  const response = await fetch(`https://technocore.chat/r/${room}?limit=200&format=json&n=${Date.now()}`, { cache: "no-store" });
+  if (response.status === 404) return { room, payload: { messages: [] } };
+  if (!response.ok) throw new Error(`Delivery room read failed (${response.status})`);
+  return { room, payload: await response.json() };
+}
 function resetPayeeUi() {
   $("#check-payee-deal").disabled = true;
   $("#discard-payee-deal").disabled = true;
@@ -2112,6 +2124,17 @@ async function syncTrackRecord({ announce = true } = {}) {
     }
     const activity = [...activityByKey.values()];
     for (const entry of activity) {
+      let spec = null;
+      const rememberedPayeeDeal = entry.contract ? readPayeeDeals()[entry.contract] : null;
+      entry.jobText ||= rememberedPayeeDeal?.jobSnapshot?.text || null;
+      const jobUrl = contextUrl(entry.offer.job.context);
+      if (jobUrl.startsWith("https://technocore.chat/")) {
+        const specResponse = await fetch(`${jobUrl}?n=${Date.now()}`);
+        if (specResponse.ok) {
+          spec = await reviewJobSpec(await specResponse.text(), entry.offer);
+          if (spec) entry.jobText = spec.text;
+        }
+      }
       let roomPayload = null;
       if (entry.accept && entry.room) {
         const roomResponse = await fetch(`https://technocore.chat/r/${entry.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" } });
@@ -2119,7 +2142,14 @@ async function syncTrackRecord({ announce = true } = {}) {
           roomPayload = await roomResponse.json();
           const deal = await summarizeDealActivity(roomPayload, entry.offer, entry.accept);
           entry.status = deal.status; entry.seqs = { ...entry.seqs, ...deal.seqs };
-          const deliveries = await listSignedDeliveries(roomPayload, entry.accept);
+          const deliveryRoom = deliveryRoomFromJobText(entry.jobText || "", entry.room);
+          let deliveryPayload = roomPayload;
+          if (deliveryRoom !== entry.room) {
+            const deliveryResponse = await fetch(`https://technocore.chat/r/${deliveryRoom}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" } });
+            deliveryPayload = deliveryResponse.ok ? await deliveryResponse.json() : { messages: [] };
+          }
+          entry.deliveryRoom = deliveryRoom;
+          const deliveries = await listSignedDeliveries(deliveryPayload, entry.accept, deliveryRoom);
           const delivery = deliveries.filter((item) => deal.seqs.reveal == null || item.seq == null || Number(item.seq) < Number(deal.seqs.reveal)).at(-1);
           entry.deliverySeq = delivery?.seq ?? null;
           entry.deliveryText = delivery?.text ?? null;
@@ -2140,30 +2170,20 @@ async function syncTrackRecord({ announce = true } = {}) {
           }
         }
       } else if (entry.offer.expiresMs <= Date.now()) entry.status = "expired";
-      const jobUrl = contextUrl(entry.offer.job.context);
-      if (jobUrl.startsWith("https://technocore.chat/")) {
-        const specResponse = await fetch(`${jobUrl}?n=${Date.now()}`);
-        if (specResponse.ok) {
-          const spec = await reviewJobSpec(await specResponse.text(), entry.offer);
-          if (spec) {
-            entry.jobText = spec.text;
-            if (entry.deliveryText) {
-              const evaluation = evaluateObjectiveDelivery(spec.text, entry.deliveryText, entry.offer);
-              const saved = readPayerDeals()[entry.contract];
-              const manuallyApproved = deliveryNeedsHumanReview(evaluation) && String(saved?.manualDeliveryApprovedSeq) === String(entry.deliverySeq);
-              const failedReview = !evaluation.ok && !deliveryNeedsHumanReview(evaluation)
-                ? makePayerDeliveryReview(entry.offer, entry.accept, entry.offer.from, Number(entry.deliverySeq), "FAIL", evaluation.reason)
-                : null;
-              const verifiedFailure = failedReview && roomPayload
-                ? await verifyExactSignedTextRecord(roomPayload, failedReview.line, entry.offer.from, failedReview.room)
-                : null;
-              entry.deliveryRejected = Boolean(verifiedFailure);
-              entry.seqs.review = verifiedFailure?.seq ?? entry.seqs.review;
-              entry.deliveryVerified = !entry.deliveryRejected && (entry.payerReceiptVerified || evaluation.ok || manuallyApproved);
-              entry.deliveryEvaluationReason = evaluation.reason;
-            }
-          }
-        }
+      if (spec && entry.deliveryText) {
+        const evaluation = evaluateObjectiveDelivery(spec.text, entry.deliveryText, entry.offer);
+        const saved = readPayerDeals()[entry.contract];
+        const manuallyApproved = deliveryNeedsHumanReview(evaluation) && String(saved?.manualDeliveryApprovedSeq) === String(entry.deliverySeq);
+        const failedReview = !evaluation.ok && !deliveryNeedsHumanReview(evaluation)
+          ? makePayerDeliveryReview(entry.offer, entry.accept, entry.offer.from, Number(entry.deliverySeq), "FAIL", evaluation.reason)
+          : null;
+        const verifiedFailure = failedReview && roomPayload
+          ? await verifyExactSignedTextRecord(roomPayload, failedReview.line, entry.offer.from, failedReview.room)
+          : null;
+        entry.deliveryRejected = Boolean(verifiedFailure);
+        entry.seqs.review = verifiedFailure?.seq ?? entry.seqs.review;
+        entry.deliveryVerified = !entry.deliveryRejected && (entry.payerReceiptVerified || evaluation.ok || manuallyApproved);
+        entry.deliveryEvaluationReason = evaluation.reason;
       }
       if (!entry.deliveryText) entry.deliveryVerified = false;
     }
@@ -2282,9 +2302,12 @@ $("#check-payee-deal").addEventListener("click", async () => {
       lockValid = railState === "locked" || railState === "claimed";
       if (!lockValid) throw new Error("PaperRail note is missing or does not match the signed contract");
     }
-    const deliveries = await listSignedDeliveries(roomPayload, deal.accept);
+    const deliveryRoom = payeeDeliveryRoom(deal);
+    const deliveryPayload = deliveryRoom === deal.room ? roomPayload : (await readPayeeDeliveryRoom(deal)).payload;
+    const deliveries = await listSignedDeliveries(deliveryPayload, deal.accept, deliveryRoom);
     const delivery = deliveries.at(-1) || null;
     deal.state = folded.state.status; deal.acceptSeq = accepted.seq; deal.lockValid = lockValid; deal.railState = railState;
+    deal.deliveryRoom = deliveryRoom;
     deal.deliverySeq = delivery?.seq ?? null;
     deal.deliveryText = delivery?.text ?? null;
     savePayeeDeal(deal);
@@ -2294,7 +2317,7 @@ $("#check-payee-deal").addEventListener("click", async () => {
     $("#work-complete").disabled = folded.state.status !== "locked" || !lockValid || !delivery;
     $("#claim-paper").disabled = !(folded.state.status === "claimed" && railState === "locked");
     $("#publish-receipt").disabled = !(folded.state.status === "claimed" && railState === "claimed");
-    $("#payee-status").textContent = `ACCEPT VERIFIED · seq #${accepted.seq}\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.room}\nTranscript state: ${folded.state.status}\nPaperRail state: ${railState}\nSigned delivery: ${delivery ? `VERIFIED · seq #${delivery.seq ?? "?"}` : "NOT PUBLISHED"}`;
+    $("#payee-status").textContent = `ACCEPT VERIFIED · seq #${accepted.seq}\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.room}\nDelivery room: /r/${deliveryRoom}${deliveryRoom === deal.room ? " (deal room)" : " (job-required external room)"}\nTranscript state: ${folded.state.status}\nPaperRail state: ${railState}\nSigned delivery: ${delivery ? `VERIFIED · seq #${delivery.seq ?? "?"}` : "NOT PUBLISHED"}`;
     notice(`Payee deal state: ${folded.state.status}`);
     void syncTrackRecord({ announce: false });
   } catch (error) { $("#payee-status").textContent = `Deal check failed: ${error.message}`; }
@@ -2362,29 +2385,32 @@ $("#publish-payee-delivery").addEventListener("click", async () => {
     notice("Delivery must be a 3-2000 character non-tclk result"); return;
   }
   try {
-    const roomResponse = await fetch(`https://technocore.chat/r/${deal.room}?limit=200&format=json&n=${Date.now()}`, { cache: "no-store" });
-    if (!roomResponse.ok) throw new Error(`Deal room read failed (${roomResponse.status})`);
-    const existing = (await listSignedDeliveries(await roomResponse.json(), deal.accept)).find((item) => item.text === text);
+    const { room: deliveryRoom, payload } = await readPayeeDeliveryRoom(deal);
+    const existing = (await listSignedDeliveries(payload, deal.accept, deliveryRoom)).find((item) => item.text === text);
     if (existing) {
-      deal.deliverySeq = existing.seq ?? null; deal.deliveryText = existing.text;
+      deal.deliveryRoom = deliveryRoom; deal.deliverySeq = existing.seq ?? null; deal.deliveryText = existing.text;
       savePayeeDeal(deal);
       notice(`Exact signed delivery already exists at seq #${existing.seq ?? "?"}; no duplicate opened`);
       return;
     }
-    if (!window.confirm(`Publish this exact signed job delivery before reveal?\n\n${text}`)) return;
-    const nonce = Date.now(); const signature = await sign(identity, deal.room, nonce, text);
-    window.open(signedUrl(deal.room, identity, signature, nonce, text), "_blank", "noopener,noreferrer");
-    notice("Signed delivery opened; confirm Technocore says ok, then press CHECK ACTIVE DEAL");
+    if (!window.confirm(`Publish this exact signed job delivery to /r/${deliveryRoom} before reveal?\n\n${text}`)) return;
+    const nonce = Date.now(); const signature = await sign(identity, deliveryRoom, nonce, text);
+    deal.deliveryRoom = deliveryRoom;
+    savePayeeDeal(deal);
+    window.open(signedUrl(deliveryRoom, identity, signature, nonce, text), "_blank", "noopener,noreferrer");
+    notice(`Signed delivery opened for /r/${deliveryRoom}; confirm Technocore says ok, then press CHECK ACTIVE DEAL`);
   } catch (error) { notice(`Delivery publication blocked: ${error.message}`); }
 });
 
 $("#publish-reveal").addEventListener("click", async () => {
   const identity = readIdentity(); const deal = readPayeeDeal(); if (!identity || !deal?.lockValid || deal.state !== "locked") return;
-  const roomResponse = await fetch(`https://technocore.chat/r/${deal.room}?limit=200&format=json&n=${Date.now()}`, { cache: "no-store" });
-  if (!roomResponse.ok) { notice(`Reveal blocked: deal room read failed (${roomResponse.status})`); return; }
-  const delivery = (await listSignedDeliveries(await roomResponse.json(), deal.accept)).at(-1);
+  let deliveryRoom; let deliveryPayload;
+  try {
+    ({ room: deliveryRoom, payload: deliveryPayload } = await readPayeeDeliveryRoom(deal));
+  } catch (error) { notice(`Reveal blocked: ${error.message}`); return; }
+  const delivery = (await listSignedDeliveries(deliveryPayload, deal.accept, deliveryRoom)).at(-1);
   if (!delivery) { notice("Reveal blocked: publish and verify the signed job delivery first"); return; }
-  deal.deliverySeq = delivery.seq ?? null; deal.deliveryText = delivery.text;
+  deal.deliveryRoom = deliveryRoom; deal.deliverySeq = delivery.seq ?? null; deal.deliveryText = delivery.text;
   savePayeeDeal(deal);
   const vaultPassword = window.prompt("Enter the deal-vault password to decrypt the reveal secret."); if (!vaultPassword) return;
   let secret; try { secret = await openSecret(vaultPassword, deal.accept.contract, deal.sealedSecret); } catch { notice("Deal-vault password is incorrect"); return; }

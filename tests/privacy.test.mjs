@@ -332,7 +332,9 @@ test("payee publishes and verifies a signed delivery before revealing", () => {
   assert.match(source, /Signed delivery:.*NOT PUBLISHED/);
   assert.match(source, /Exact signed delivery already exists at seq/);
   assert.match(source, /Reveal blocked: publish and verify the signed job delivery first/);
-  assert.match(source, /listSignedDeliveries\(await roomResponse\.json\(\), deal\.accept\)/);
+  assert.match(source, /readPayeeDeliveryRoom\(deal\)/);
+  assert.match(source, /listSignedDeliveries\(deliveryPayload, deal\.accept, deliveryRoom\)/);
+  assert.match(source, /sign\(identity, deliveryRoom, nonce, text\)/);
 });
 
 test("refunds an expired locked payer deal before issuing its terminal receipt", () => {
