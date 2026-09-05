@@ -454,7 +454,8 @@ export function evaluateObjectiveDelivery(jobText, deliveryText, offer) {
   }
 
   const hash = offer?.job?.id?.match(/([0-9a-f]{64})$/i)?.[1]?.toLowerCase();
-  if (hash && !delivery.toLowerCase().includes(hash)) return { ok: false, reason: "Exact job hash is missing" };
+  const requiresExactHash = /(?:exact job hash|exact hash|computed hash|jobHash|hash binding|note header sha256|offer\.job\.id|final 64 hex)/i.test(requirements);
+  if (requiresExactHash && hash && !delivery.toLowerCase().includes(hash)) return { ok: false, reason: "Exact job hash is missing" };
   if (/signer DID/i.test(job) && offer?.from && !delivery.includes(offer.from)) return { ok: false, reason: "Exact signer DID is missing" };
   if (/asset|paper-only|paper only/i.test(requirements) && !/\bPAPER\b/i.test(delivery)) return { ok: false, reason: "PAPER asset/rail result is missing" };
   if (/signature/i.test(job) && !/(?:signature|ed25519)[^.!?]{0,200}(?:valid|pass|true)|(?:valid|pass|true)[^.!?]{0,200}(?:signature|ed25519)/i.test(delivery)) {
@@ -469,8 +470,8 @@ export function evaluateObjectiveDelivery(jobText, deliveryText, offer) {
       ["accept", /\baccept\b/i],
       ["PAPER lock", /\bpaper(?:rail)?\b[^.!?]{0,60}\block\b|\block\b[^.!?]{0,60}\bpaper(?:rail)?\b/i],
       ["reveal", /\breveal\b/i],
-      ["claimed receipt", /\bclaimed receipt\b/i],
-      ["terminal claimed state", /\bterminal claimed state\b/i],
+      ["claimed receipt", /\bclaimed receipt\b|\bclaimed\b[^.!?]{0,120}\breceipt\b|\breceipt\b[^.!?]{0,120}\bclaimed\b/i],
+      ["terminal claimed state", /\bterminal claimed state\b|\bterminal\b[^.!?]{0,120}\bclaimed\b|\bclaimed\b[^.!?]{0,120}\bterminal\b/i],
     ];
     for (const [label, expression] of requiredTerms) if (!expression.test(delivery)) return { ok: false, reason: `${label} evidence is missing` };
     return { ok: true, reason: "Interop custom checks passed" };

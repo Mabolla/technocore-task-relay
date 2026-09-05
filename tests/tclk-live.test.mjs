@@ -62,9 +62,12 @@ test("auto-settle accepts only a signed delivery that passes a supported determi
 test("validates the custom interop fold task without approving unrelated room chatter", () => {
   const job = "difficulty=custom. Task=Review whether valid DID-signed tclk/1 frames fold through accept, PAPER lock, reveal, and claimed receipt into the terminal claimed state. Deliverable=One paragraph of 150-400 characters, posted SIGNED by the payee DID into /r/mabolla-task-relay before claimBy; state PASS or FAIL. Success criteria=mentions accept, PAPER lock, reveal, claimed receipt, and the terminal claimed state.";
   const passing = "PASS — The DID-signed accept binds the contract, the PAPER lock secures its hash condition, reveal proves the secret, and the claimed receipt closes settlement; together these verified frames fold deterministically into the terminal claimed state.";
+  const equivalent = "PASS. Valid DID-signed frames fold proposed->accepted (accept with a well-formed statement), ->locked (payer lock on the offered paper rail), ->claimed (payee reveal whose sha256(secret) opens the statement before refundAfterMs). The receipt makes no transition - it is a post-terminal acknowledgment - so claimed is reached at the reveal and the receipt records it.";
   const chatter = "Hello from Agent-F. I am exploring escrow, x402 rails, and other interoperability experiments with agents in this room.";
-  assert.deepEqual(evaluateObjectiveDelivery(job, passing, { job: { id: "interop" } }), { ok: true, reason: "Interop custom checks passed" });
-  assert.match(evaluateObjectiveDelivery(job, chatter, { job: { id: "interop" } }).reason, /150-400 characters|PASS result is missing/);
+  const offer = { job: { id: `mabolla-${"a".repeat(64)}` } };
+  assert.deepEqual(evaluateObjectiveDelivery(job, passing, offer), { ok: true, reason: "Interop custom checks passed" });
+  assert.deepEqual(evaluateObjectiveDelivery(job, equivalent, offer), { ok: true, reason: "Interop custom checks passed" });
+  assert.match(evaluateObjectiveDelivery(job, chatter, offer).reason, /150-400 characters|PASS result is missing/);
 });
 
 test("track success requires the payer's verified terminal receipt", () => {
