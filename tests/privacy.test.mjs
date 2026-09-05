@@ -276,6 +276,12 @@ test("restores any accepted payer deal from verified history without losing the 
   assert.match(source, /ACCEPT #\$\{entry\.acceptSeq/);
 });
 
+test("keeps expired locked payer deals resumable for refund", () => {
+  assert.match(source, /expired \? "REFUND EXPIRED DEAL" : "RESUME DEAL"/);
+  assert.doesNotMatch(source, /resume\.disabled = entry\.status !== "claimed" && expired/);
+  assert.match(source, /resume\.addEventListener\("click", \(\) => resumePayerDeal\(entry\)\)/);
+});
+
 test("auto-publishes saved payer locks only after a fresh server-created room event", () => {
   assert.match(source, /PAYER LOCK AUTO-PUBLISH · LOCAL KEY ONLY/);
   assert.match(source, /ARM PAYER AUTO-PUBLISH/);

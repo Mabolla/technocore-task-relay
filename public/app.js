@@ -2119,9 +2119,8 @@ function renderTrackRecord() {
     if (entry.role === "payer" && entry.accept && (["accepted", "locked"].includes(entry.status) || (entry.status === "claimed" && !entry.deliveryVerified && !entry.deliveryRejected && !entry.noDeliveryRejected))) {
       const resume = document.createElement("button");
       const expired = entry.offer.refundAfterMs <= Date.now();
-      resume.textContent = entry.status === "claimed" ? "REVIEW DELIVERY" : expired ? "PAST REFUND WINDOW" : "RESUME DEAL";
-      resume.disabled = entry.status !== "claimed" && expired;
-      if (entry.status === "claimed" || !expired) resume.addEventListener("click", () => resumePayerDeal(entry));
+      resume.textContent = entry.status === "claimed" ? "REVIEW DELIVERY" : expired ? "REFUND EXPIRED DEAL" : "RESUME DEAL";
+      resume.addEventListener("click", () => resumePayerDeal(entry));
       status.append(resume);
     }
     row.append(role, job, chain, status); return row;
