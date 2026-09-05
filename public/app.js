@@ -184,7 +184,7 @@ function forgetPayeeDeal(contract) {
 }
 
 function queuedPayeeDeals() {
-  return Object.values(readPayeeDeals()).filter((deal) => deal?.accept?.contract && deal.acceptSeq && !["claimed", "refunded", "abandoned"].includes(deal.state));
+  return Object.values(readPayeeDeals()).filter((deal) => deal?.accept?.contract && deal.acceptSeq && !["refunded", "cancelled", "abandoned"].includes(deal.state));
 }
 
 function activePayeeDeals() {
@@ -192,6 +192,56 @@ function activePayeeDeals() {
     ["accepted", "accepted-room-pending"].includes(deal.state)
     && Date.now() >= Number(deal.offer?.claimByMs || 0)
   ));
+}
+
+function removePayeeDealFromActiveQueue(deal) {
+  const contract = deal?.accept?.contract;
+  if (!contract) return;
+  forgetPayeeDeal(contract);
+  if (readPayeeDeal()?.accept?.contract === contract) {
+    localStorage.removeItem(PAYEE_DEAL_KEY);
+    resetPayeeUi();
+    renderPayeeAutoAccept();
+    renderPayeeJobNote();
+  }
+}
+
+async function reconcilePayeeDealQueue() {
+  const identity = readIdentity();
+  const deals = queuedPayeeDeals();
+  await Promise.all(deals.map(async (deal) => {
+    try {
+      const response = await fetch(`https://technocore.chat/r/${deal.room}?limit=200&format=json&n=${Date.now()}`, {
+        headers: { accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(4_000),
+      });
+      if (!response.ok) return;
+      const payload = await response.json();
+      const folded = await foldPayeeDeal(payload, deal.offer, deal.accept);
+      if (["refunded", "cancelled"].includes(folded.state.status)) {
+        removePayeeDealFromActiveQueue(deal);
+        return;
+      }
+      if (folded.state.status === "claimed" && identity?.did === deal.accept.from) {
+        const receipt = makePayeeReceipt(deal.accept, identity.did, "claimed");
+        if (await verifyExactFrameRecord(payload, receipt.frame, receipt.room)) {
+          removePayeeDealFromActiveQueue(deal);
+          return;
+        }
+      }
+      if (["accepted", "accepted-room-pending"].includes(deal.state)
+        && Date.now() >= Number(deal.offer?.claimByMs || 0)
+        && !["locked", "claimed"].includes(folded.state.status)) {
+        removePayeeDealFromActiveQueue(deal);
+        return;
+      }
+      if (folded.state.status !== deal.state) {
+        deal.state = folded.state.status;
+        rememberPayeeDeal(deal);
+      }
+    } catch { /* A temporary read failure must not delete a live local deal. */ }
+  }));
+  renderPayeeDealQueue();
+  renderPayeeAutoHunter();
 }
 
 function rememberPayerDeal(deal) {
@@ -400,7 +450,7 @@ function renderPayeeDealQueue() {
   const root = $("#payee-deal-queue");
   if (!root) return;
   const currentContract = readPayeeDeal()?.accept?.contract;
-  const deals = queuedPayeeDeals().sort((left, right) => Number(left.offerSeq || 0) - Number(right.offerSeq || 0));
+  const deals = activePayeeDeals().sort((left, right) => Number(left.offerSeq || 0) - Number(right.offerSeq || 0));
   root.classList.toggle("empty", !deals.length);
   if (!deals.length) {
     root.replaceChildren(document.createTextNode("No accepted payee jobs in the local queue."));
@@ -2535,6 +2585,8 @@ renderPayeeAutoAccept();
 if (readPayeeDeal()) rememberPayeeDeal(readPayeeDeal());
 renderPayeeDealQueue();
 renderPayeeJobNote();
+void reconcilePayeeDealQueue();
+setInterval(() => { void reconcilePayeeDealQueue(); }, 30_000);
 if (readPayeeAutoHunter().armed) {
   const staleHunter = readPayeeAutoHunter();
   localStorage.setItem(PAYEE_AUTO_HUNTER_KEY, JSON.stringify({
