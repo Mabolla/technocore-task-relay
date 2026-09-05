@@ -412,6 +412,14 @@ export function deliveryRoomFromJobText(jobText, fallbackRoom) {
   return match?.[1] || fallback;
 }
 
+export function resolveDeliveryRoom(jobText, fallbackRoom, rememberedRoom) {
+  const fallback = deliveryRoomFromJobText("", fallbackRoom);
+  const explicit = deliveryRoomFromJobText(jobText, fallback);
+  if (explicit !== fallback) return explicit;
+  const remembered = String(rememberedRoom || "").trim();
+  return remembered && remembered !== fallback ? deliveryRoomFromJobText("", remembered) : fallback;
+}
+
 function countMatches(text, expression) {
   return [...text.matchAll(expression)].length;
 }

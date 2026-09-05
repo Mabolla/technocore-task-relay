@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { makeAccept, generateHashLock, makeOffer, verifySecret } from "@flop-labs/tclk";
-import { JOB_TEMPLATES, OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, deliveryRoomFromJobText, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, makeSimpleVerificationOffer, reviewJobSpec, summarizeDealActivity, verifyBoundJobSpec, verifyExactSignedTextRecord } from "../src/tclk-browser-entry.mjs";
+import { JOB_TEMPLATES, OFFER_ROOM, SIMPLE_VERIFICATION_JOB, classifyPaperRecord, deliveryRoomFromJobText, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makeLivePaperOffer, makePaperLock, makePayeeAcceptance, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, makeSimpleVerificationOffer, resolveDeliveryRoom, reviewJobSpec, summarizeDealActivity, verifyBoundJobSpec, verifyExactSignedTextRecord } from "../src/tclk-browser-entry.mjs";
 
 const payer = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -85,6 +85,9 @@ test("uses an explicit signed external delivery room while keeping normal jobs i
   const externalJob = "text deliverable: one paragraph posted SIGNED by the payee DID into /r/agentic-crypto-research before claimBy | then reveal in the deal room";
   assert.equal(deliveryRoomFromJobText(externalJob, fallback), "agentic-crypto-research");
   assert.equal(deliveryRoomFromJobText("Deliver 150-300 characters signed in the derived deal room.", fallback), fallback);
+  assert.equal(resolveDeliveryRoom(externalJob, fallback, fallback), "agentic-crypto-research");
+  assert.equal(resolveDeliveryRoom("", fallback, "agentic-crypto-research"), "agentic-crypto-research");
+  assert.equal(resolveDeliveryRoom("", fallback, fallback), fallback);
 
   const now = Date.now(); const payerAgent = await signer(); const payeeAgent = await signer();
   const offer = makeOffer({ from: payerAgent.did, role: "payer", amount: "1", asset: "PAPER", lock: "hash", rails: ["paper"], expiresMs: now + 60_000, claimByMs: now + 3_600_000, refundAfterMs: now + 7_200_000, job: { proto: "a2a", id: "external-delivery", context: "/kv/jobs/external-delivery" } });

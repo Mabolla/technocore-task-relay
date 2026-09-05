@@ -1,5 +1,5 @@
 import { auditTranscript } from "./tclk.js";
-import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, deliveryRoomFromJobText, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord, verifyExactSignedTextRecord } from "./tclk-official.js?v=external-delivery-room-1";
+import { JOB_TEMPLATES, OFFER_ROOM, classifyPaperRecord, deliveryRoomFromJobText, encodeFrame, evaluateObjectiveDelivery, expectedPaperClaim, expectedPaperLock, expectedPaperRefund, findValidAccept, foldPayeeDeal, isSuccessfulTrackEntry, listMyPaperActivity, listRecentAcceptedPayerDeals, listSafePaperOffers, listSignedDeliveries, makeJobOffer, makePaperLock, makePayeeAcceptance, makePayeeReceipt, makePayeeReveal, makePayerDeliveryReview, makePayerNoDeliveryReview, makePayerRefund, resolveDeliveryRoom, reviewJobSpec, summarizeDealActivity, verifyAcceptRecord, verifyBoundJobSpec, verifyExactFrameRecord, verifyExactSignedTextRecord } from "./tclk-official.js?v=delivery-room-recovery-1";
 
 const ROOM = "mabolla-task-relay";
 const IDENTITY_KEY = "mabolla.task-relay.identity.v1";
@@ -1699,7 +1699,7 @@ async function readOfferWindow(offerSeq) {
 }
 
 function payeeDeliveryRoom(deal) {
-  return deliveryRoomFromJobText(deal?.jobSnapshot?.text || "", deal?.room);
+  return resolveDeliveryRoom(deal?.jobSnapshot?.text || "", deal?.room, deal?.deliveryRoom);
 }
 
 async function readPayeeDeliveryRoom(deal) {
@@ -2132,7 +2132,8 @@ async function syncTrackRecord({ announce = true } = {}) {
       let spec = null;
       const rememberedPayeeDeal = entry.contract ? readPayeeDeals()[entry.contract] : null;
       entry.jobText ||= rememberedPayeeDeal?.jobSnapshot?.text || null;
-      entry.deliveryRoom ||= rememberedPayeeDeal?.deliveryRoom || null;
+      const rememberedExternalRoom = [rememberedPayeeDeal?.deliveryRoom, entry.deliveryRoom]
+        .find((room) => room && room !== entry.room) || null;
       const jobUrl = contextUrl(entry.offer.job.context);
       if (jobUrl.startsWith("https://technocore.chat/")) {
         const specResponse = await fetch(`${jobUrl}?n=${Date.now()}`);
@@ -2148,9 +2149,7 @@ async function syncTrackRecord({ announce = true } = {}) {
           roomPayload = await roomResponse.json();
           const deal = await summarizeDealActivity(roomPayload, entry.offer, entry.accept);
           entry.status = deal.status; entry.seqs = { ...entry.seqs, ...deal.seqs };
-          const deliveryRoom = entry.deliveryRoom
-            ? deliveryRoomFromJobText("", entry.deliveryRoom)
-            : deliveryRoomFromJobText(entry.jobText || "", entry.room);
+          const deliveryRoom = resolveDeliveryRoom(entry.jobText || "", entry.room, rememberedExternalRoom);
           let deliveryPayload = roomPayload;
           if (deliveryRoom !== entry.room) {
             const deliveryResponse = await fetch(`https://technocore.chat/r/${deliveryRoom}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" } });

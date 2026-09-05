@@ -3553,6 +3553,13 @@ function deliveryRoomFromJobText(jobText, fallbackRoom) {
   const match = text.match(/\b(?:post(?:ed)?|publish(?:ed)?|deliver(?:ed)?)\s+SIGNED\b[^|]{0,240}?\b(?:into|to)\s+\/r\/([a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?)(?=\s|[.,;:|)]|$)/i);
   return match?.[1] || fallback;
 }
+function resolveDeliveryRoom(jobText, fallbackRoom, rememberedRoom) {
+  const fallback = deliveryRoomFromJobText("", fallbackRoom);
+  const explicit = deliveryRoomFromJobText(jobText, fallback);
+  if (explicit !== fallback) return explicit;
+  const remembered = String(rememberedRoom || "").trim();
+  return remembered && remembered !== fallback ? deliveryRoomFromJobText("", remembered) : fallback;
+}
 function countMatches(text, expression) {
   return [...text.matchAll(expression)].length;
 }
@@ -3682,6 +3689,7 @@ export {
   makePayerNoDeliveryReview,
   makePayerRefund,
   makeSimpleVerificationOffer,
+  resolveDeliveryRoom,
   reviewJobSpec,
   summarizeDealActivity,
   verifyAcceptRecord,
