@@ -437,6 +437,18 @@ function savePayeeDeal(deal) {
   renderPayeeJobNote(deal);
 }
 
+function recoverTrackedPayeeAccept(deal) {
+  const contract = deal?.accept?.contract;
+  if (!contract) return null;
+  const entry = readTrackRecords().find((candidate) => {
+    if (candidate?.role !== "payee" || candidate.contract !== contract || !candidate.accept) return false;
+    try { return encodeFrame(candidate.accept) === encodeFrame(deal.accept); }
+    catch { return false; }
+  });
+  const seq = Number(entry?.acceptSeq ?? entry?.seqs?.accept);
+  return Number.isInteger(seq) && seq >= 1 ? { seq } : null;
+}
+
 function payeeQueueLabel(deal) {
   if (["accepted", "accepted-room-pending"].includes(deal.state) && Date.now() >= Number(deal.offer?.claimByMs || 0)) return "DEADLINE PASSED · NO LOCAL LOCK";
   if (deal.state === "locked") return "LOCKED · READY TO WORK";
@@ -767,9 +779,13 @@ function renderPayeeAutoHunter() {
       ? "PARK ACTIVE DEAL & ARM AUTO-JOB HUNTER"
       : "ARM AUTO-JOB HUNTER";
   stop.disabled = !state.armed;
+  const activeCount = activePayeeDeals().length;
+  const stoppedReason = /^QUEUE FULL/.test(state.reason || "") && activeCount < MAX_ACTIVE_PAYEE_DEALS
+    ? `QUEUE CAPACITY AVAILABLE · ${activeCount}/${MAX_ACTIVE_PAYEE_DEALS} ACCEPTED JOBS`
+    : state.reason;
   status.textContent = state.armed
     ? `ARMED · TAB MUST STAY OPEN\nQueued jobs: ${activePayeeDeals().length}/${MAX_ACTIVE_PAYEE_DEALS}\nMinimum finish time: ${state.minFinishMinutes}m\n${state.status || "Watching signed tclk-offers"}`
-    : `OFF\n${state.reason || "Arms once, immediately claims the newest actionable PAPER job, then creates its deal room."}`;
+    : `OFF\n${stoppedReason || "Arms once, immediately claims the newest actionable PAPER job, then creates its deal room."}`;
 }
 
 function stopPayeeAutoHunter(reason) {
@@ -2569,7 +2585,8 @@ $("#check-payee-deal").addEventListener("click", async () => {
     }
     const accepted = deal.acceptSeq
       ? { seq: deal.acceptSeq }
-      : await verifyAcceptRecord(await readOfferWindow(deal.offerSeq), deal.offer, deal.accept);
+      : recoverTrackedPayeeAccept(deal)
+        || await verifyAcceptRecord(await readOfferWindow(deal.offerSeq), deal.offer, deal.accept);
     if (!accepted) { $("#payee-status").textContent = "Accept is not yet confirmed in tclk-offers."; return; }
     const roomResponse = await fetch(`https://technocore.chat/r/${deal.room}?limit=200&format=json&n=${Date.now()}`);
     if (!roomResponse.ok) throw new Error(`Deal room read failed (${roomResponse.status})`);
