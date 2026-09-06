@@ -311,6 +311,13 @@ test("restores an accepted payee deal from the verified track record", () => {
   assert.match(source, /void \$\("#check-payee-deal"\)\.click\(\)/);
 });
 
+test("distinguishes a lock frame from a verified payee PaperRail lock", () => {
+  assert.match(source, /LOCK PRESENT · RAIL UNVERIFIED/);
+  assert.match(source, /entry\.role === "payee" && \["locked", "claimed"\]\.includes\(deal\.status\)/);
+  assert.match(source, /deal\.rail === "paper" && deal\.railRef === expected\.ref/);
+  assert.match(source, /entry\.railVerified = paperState === "locked" \|\| paperState === "claimed"/);
+});
+
 test("keeps expired locked payer deals resumable for refund", () => {
   assert.match(source, /expired \? "REFUND EXPIRED DEAL" : "RESUME DEAL"/);
   assert.doesNotMatch(source, /resume\.disabled = entry\.status !== "claimed" && expired/);
