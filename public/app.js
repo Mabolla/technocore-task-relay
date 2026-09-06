@@ -952,12 +952,22 @@ function payerNoDeliveryReview(deal) {
   return makePayerNoDeliveryReview(deal.offer, deal.accept, deal.offer.from);
 }
 
+function rememberVerifiedRecord(deal, label, seq = null, url = null) {
+  const numericSeq = Number(seq);
+  deal.lastVerifiedRecordLabel = label;
+  deal.lastVerifiedRecordSeq = Number.isInteger(numericSeq) && numericSeq >= 1 ? numericSeq : null;
+  deal.lastVerifiedRecordUrl = url || (deal.lastVerifiedRecordSeq
+    ? `https://technocore.chat/r/${deal.lock.room}?since=${Math.max(0, deal.lastVerifiedRecordSeq - 1)}`
+    : `https://technocore.chat/r/${deal.lock.room}`);
+}
+
 async function inspectPayerFailReview(deal, roomPayload) {
   const signed = await findSignedPayerFailReview(roomPayload, deal.offer, deal.accept, Number(deal.deliverySeq), deal.lock.room);
   if (signed) {
     deal.failReviewSeq = signed.seq;
     deal.failReviewVerifiedAt = new Date().toISOString();
     deal.autoSettleStatus = `DELIVERY REJECTED · FAIL REVIEW #${signed.seq ?? "?"}`;
+    rememberVerifiedRecord(deal, "FAIL REVIEW", signed.seq);
     return signed;
   }
   if (!deliveryFailureReviewAllowed(deal)) {
@@ -971,6 +981,7 @@ async function inspectPayerFailReview(deal, roomPayload) {
   deal.failReviewSeq = existing.seq;
   deal.failReviewVerifiedAt = new Date().toISOString();
   deal.autoSettleStatus = `DELIVERY REJECTED · FAIL REVIEW #${existing.seq ?? "?"}`;
+  rememberVerifiedRecord(deal, "FAIL REVIEW", existing.seq);
   return existing;
 }
 
@@ -987,6 +998,7 @@ async function inspectPayerNoDeliveryReview(deal, roomPayload) {
   deal.noDeliveryReviewSeq = existing.seq;
   deal.noDeliveryReviewVerifiedAt = new Date().toISOString();
   deal.autoSettleStatus = `NO DELIVERY REJECTED · FAIL REVIEW #${existing.seq ?? "?"}`;
+  rememberVerifiedRecord(deal, "NO-DELIVERY REVIEW", existing.seq);
   return existing;
 }
 
@@ -1038,6 +1050,7 @@ async function publishVerifiedPayerReceipt(deal, roomPayload, outcome) {
     deal.receiptSeq = existing.seq;
     deal.receiptVerifiedAt = new Date().toISOString();
     deal.autoSettleStatus = `TERMINAL RECEIPT VERIFIED · seq #${existing.seq ?? "?"}`;
+    rememberVerifiedRecord(deal, `${outcome.toUpperCase()} RECEIPT`, existing.seq);
     updateStoredPayerDeal(deal);
     return true;
   }
@@ -1062,6 +1075,7 @@ async function publishVerifiedPayerReceipt(deal, roomPayload, outcome) {
       deal.receiptSeq = verified.seq;
       deal.receiptVerifiedAt = new Date().toISOString();
       deal.autoSettleStatus = `TERMINAL RECEIPT VERIFIED · seq #${verified.seq ?? "?"}`;
+      rememberVerifiedRecord(deal, `${outcome.toUpperCase()} RECEIPT`, verified.seq);
       updateStoredPayerDeal(deal);
       return true;
     }
@@ -1176,6 +1190,13 @@ function renderPayerDeal() {
   const legacyLockSubmission = deal?.state === "lock-submitted" || deal?.state === "lock-submission-opened";
   const verifiedState = legacyLockSubmission ? "accepted" : (deal?.state || "accepted");
   $("#open-payer-room").disabled = !deal;
+  const verifiedRecordButton = $("#open-verified-record");
+  if (verifiedRecordButton) {
+    verifiedRecordButton.disabled = !deal?.lastVerifiedRecordUrl;
+    verifiedRecordButton.textContent = deal?.lastVerifiedRecordUrl
+      ? `OPEN VERIFIED ${deal.lastVerifiedRecordLabel || "RECORD"}${deal.lastVerifiedRecordSeq ? ` #${deal.lastVerifiedRecordSeq}` : ""}`
+      : "OPEN VERIFIED RECORD";
+  }
   $("#check-payer-deal").disabled = !deal;
   const claimedTerminal = verifiedState === "claimed" && deal?.railState === "claimed";
   const refundedTerminal = verifiedState === "refunded" && deal?.railState === "refunded";
@@ -1670,6 +1691,7 @@ $("#create-paper-lock").addEventListener("click", async () => {
     if (current.ok) {
       if (stripNoteBanner(await current.text()) !== deal.lock.value) throw new Error("PaperRail note already exists with different terms");
       deal.railState = "locked";
+      rememberVerifiedRecord(deal, "PAPERRAIL LOCK", null, noteUrl);
       saveActivePayerDeal(deal);
       renderPayerDeal();
       notice("Exact PaperRail lock verified; signed lock is ready to publish");
@@ -1682,6 +1704,7 @@ $("#create-paper-lock").addEventListener("click", async () => {
     current = await fetch(`${noteUrl}?n=${Date.now()}`, { cache: "no-store" });
     if (!current.ok || stripNoteBanner(await current.text()) !== deal.lock.value) throw new Error("PaperRail creation returned without a verifiable exact lock");
     deal.railState = "locked";
+    rememberVerifiedRecord(deal, "PAPERRAIL LOCK", null, noteUrl);
     saveActivePayerDeal(deal);
     renderPayerDeal();
     notice("PaperRail lock created and verified; signed lock is ready to publish");
@@ -1707,6 +1730,7 @@ $("#publish-payer-lock").addEventListener("click", async () => {
     const existing = await verifyExactFrameRecord(roomPayload, deal.lock.frame, deal.lock.room);
     if (existing) {
       deal.state = "locked"; deal.lockSeq = existing.seq; deal.lockVerifiedAt = new Date().toISOString();
+      rememberVerifiedRecord(deal, "LOCK", existing.seq);
       delete deal.lockPublishReturnedOkAt;
       saveActivePayerDeal(deal); renderPayerDeal();
       notice(`Signed payer lock already verified at seq #${existing.seq ?? "?"}`);
@@ -1726,6 +1750,7 @@ $("#publish-payer-lock").addEventListener("click", async () => {
       const verified = await verifyExactFrameRecord(roomPayload, deal.lock.frame, deal.lock.room);
       if (verified) {
         deal.state = "locked"; deal.lockSeq = verified.seq; deal.lockVerifiedAt = new Date().toISOString();
+        rememberVerifiedRecord(deal, "LOCK", verified.seq);
         delete deal.lockPublishReturnedOkAt;
         saveActivePayerDeal(deal); renderPayerDeal();
         notice(`Signed payer lock verified at seq #${verified.seq ?? "?"}`);
@@ -1746,6 +1771,13 @@ $("#open-payer-room").addEventListener("click", () => {
   window.open(`https://technocore.chat/r/${deal.lock.room}`, "_blank", "noopener,noreferrer");
 });
 
+$("#open-verified-record").addEventListener("click", () => {
+  const deal = readPayerDeal();
+  const url = deal?.lastVerifiedRecordUrl;
+  if (!url || !url.startsWith("https://technocore.chat/")) { notice("No verified Technocore record is available yet"); return; }
+  window.open(url, "_blank", "noopener,noreferrer");
+});
+
 $("#check-payer-deal").addEventListener("click", async () => {
   const deal = readPayerDeal();
   if (!deal) { notice("Deal check blocked: no active payer deal"); return; }
@@ -1759,6 +1791,8 @@ $("#check-payer-deal").addEventListener("click", async () => {
     const noteResponse = await fetch(`https://technocore.chat/kv/${expected.note.ns}/${expected.note.key}?n=${Date.now()}`);
     if (noteResponse.ok) railState = classifyPaperRecord(stripNoteBanner(await noteResponse.text()), deal.offer, deal.accept);
     deal.state = folded.state.status; deal.railState = railState; deal.checkedAt = new Date().toISOString();
+    const latestPayerFrame = folded.applied.filter((item) => item.frame.from === deal.offer.from && item.seq != null).at(-1);
+    if (latestPayerFrame) rememberVerifiedRecord(deal, latestPayerFrame.frame.type.toUpperCase(), latestPayerFrame.seq);
     await inspectSignedPayerDelivery(deal, roomPayload, folded);
     await inspectPayerFailReview(deal, roomPayload);
     await inspectPayerNoDeliveryReview(deal, roomPayload);
@@ -1792,6 +1826,7 @@ $("#publish-payer-receipt").addEventListener("click", async () => {
     if (existing) {
       deal.receiptSeq = existing.seq;
       deal.receiptVerifiedAt = new Date().toISOString();
+      rememberVerifiedRecord(deal, `${deal.state.toUpperCase()} RECEIPT`, existing.seq);
       saveActivePayerDeal(deal);
       notice(`Terminal receipt already exists at seq #${existing.seq ?? "?"}; no duplicate was published`);
       return;
@@ -1837,6 +1872,8 @@ $("#refund-payer-deal").addEventListener("click", async () => {
       const verifiedRail = noteResponse.ok ? classifyPaperRecord(stripNoteBanner(await noteResponse.text()), deal.offer, deal.accept) : "absent";
       if (verifiedRail !== "refunded") throw new Error(`Refund frame exists but PaperRail is ${verifiedRail}, not refunded`);
       deal.state = "refunded"; deal.railState = verifiedRail;
+      const existingRefund = folded.applied.filter((item) => item.frame.type === "refund" && item.frame.from === deal.offer.from).at(-1);
+      if (existingRefund) rememberVerifiedRecord(deal, "REFUND", existingRefund.seq);
       saveActivePayerDeal(deal); renderPayerDeal();
       notice("Signed refund is already verified in the transcript");
       return;
@@ -1868,6 +1905,7 @@ $("#refund-payer-deal").addEventListener("click", async () => {
       const verified = await verifyExactFrameRecord(await check.json(), refund.frame, refund.room);
       if (verified) {
         deal.state = "refunded"; deal.refundSeq = verified.seq; deal.refundVerifiedAt = new Date().toISOString();
+        rememberVerifiedRecord(deal, "REFUND", verified.seq);
         delete deal.refundPublishReturnedOkAt;
         saveActivePayerDeal(deal); renderPayerDeal();
         notice(`PaperRail and signed refund verified at seq #${verified.seq ?? "?"}`);
