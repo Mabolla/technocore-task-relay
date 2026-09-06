@@ -255,6 +255,7 @@ test("builds payer and payee track records from verified rendezvous frames", asy
   const lock = { type: "lock", from: payerAgent.did, contract: accept.contract, rail: "paper", ref: accept.contract };
   const lockRecord = { ...(await record(payerAgent, payeeRows[0].room, encodeFrame(lock), "1800000000003", new Date(now + 2).toISOString())), seq: 103 };
   const summary = await summarizeDealActivity({ messages: [lockRecord] }, offer, accept, now + 3);
+  assert.equal(summary.rail, "paper"); assert.equal(summary.railRef, accept.contract);
   assert.equal(summary.status, "locked"); assert.equal(summary.seqs.lock, 103);
 });
 
