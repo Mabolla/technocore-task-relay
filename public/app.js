@@ -2347,6 +2347,26 @@ function resumePayerDeal(entry) {
   notice(`Payer deal restored: OFFER #${entry.offerSeq ?? "?"} → ACCEPT #${entry.acceptSeq ?? "?"}`);
 }
 
+function resumePayeeDeal(entry) {
+  if (entry.role !== "payee" || !entry.contract) return;
+  const current = readPayeeDeal();
+  if (current) rememberPayeeDeal(current);
+  const deal = readPayeeDeals()[entry.contract]
+    || (current?.accept?.contract === entry.contract ? current : null);
+  if (!deal) {
+    notice("Payee deal cannot be resumed: its browser-local encrypted secret is unavailable");
+    return;
+  }
+  deal.acceptSeq ??= entry.acceptSeq ?? entry.seqs?.accept;
+  savePayeeDeal(deal);
+  $("#check-payee-deal").disabled = false;
+  $("#discard-payee-deal").disabled = true;
+  renderPayeeDealQueue();
+  document.querySelector("#payee-status").scrollIntoView({ behavior: "smooth", block: "center" });
+  notice(`Payee deal restored: OFFER #${entry.offerSeq ?? "?"} → ACCEPT #${deal.acceptSeq ?? "?"}`);
+  void $("#check-payee-deal").click();
+}
+
 function renderTrackRecord() {
   const entries = readTrackRecords();
   $("#track-given").textContent = entries.filter((entry) => entry.role === "payer").length;
@@ -2380,6 +2400,12 @@ function renderTrackRecord() {
       const expired = entry.offer.refundAfterMs <= Date.now();
       resume.textContent = entry.status === "claimed" ? "REVIEW DELIVERY" : expired ? "REFUND EXPIRED DEAL" : "RESUME DEAL";
       resume.addEventListener("click", () => resumePayerDeal(entry));
+      status.append(resume);
+    }
+    if (entry.role === "payee" && ["accepted", "locked"].includes(entry.status)) {
+      const resume = document.createElement("button");
+      resume.textContent = "RESUME JOB";
+      resume.addEventListener("click", () => resumePayeeDeal(entry));
       status.append(resume);
     }
     row.append(role, job, chain, status); return row;
