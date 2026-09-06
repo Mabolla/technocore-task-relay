@@ -2437,10 +2437,16 @@ function renderTrackRecord() {
     chain.textContent = parts.length ? parts.join(" → ") : "No verified seq";
     const status = document.createElement("td");
     const label = document.createElement("div"); label.textContent = statusLabel(entry); status.append(label);
-    if (entry.role === "payer" && entry.accept && (["accepted", "locked"].includes(entry.status) || (entry.status === "claimed" && !entry.deliveryVerified && !entry.deliveryRejected && !entry.noDeliveryRejected))) {
+    const claimedNeedsPayerAction = entry.status === "claimed"
+      && !entry.deliveryRejected
+      && !entry.noDeliveryRejected
+      && (!entry.deliveryVerified || !entry.payerReceiptVerified);
+    if (entry.role === "payer" && entry.accept && (["accepted", "locked"].includes(entry.status) || claimedNeedsPayerAction)) {
       const resume = document.createElement("button");
       const expired = entry.offer.refundAfterMs <= Date.now();
-      resume.textContent = entry.status === "claimed" ? "REVIEW DELIVERY" : expired ? "REFUND EXPIRED DEAL" : "RESUME DEAL";
+      resume.textContent = entry.status === "claimed"
+        ? entry.deliveryVerified ? "SIGN PAYER RECEIPT" : "REVIEW DELIVERY"
+        : expired ? "REFUND EXPIRED DEAL" : "RESUME DEAL";
       resume.addEventListener("click", () => resumePayerDeal(entry));
       status.append(resume);
     }
