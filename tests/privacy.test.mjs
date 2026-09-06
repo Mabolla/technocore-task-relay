@@ -398,6 +398,14 @@ test("human-reviewed custom deliveries can be rejected with a signed FAIL review
   assert.match(source, /const contractBinding = ` contract /);
 });
 
+test("allows a claimed transcript failure review before PaperRail reaches terminal state", () => {
+  assert.match(source, /const claimedTranscript = verifiedState === "claimed"/);
+  assert.match(source, /claimedTranscript && \(deterministicDeliveryFailure/);
+  assert.match(source, /Review and reject the failed signed delivery now; PaperRail settlement remains pending/);
+  const failHandler = source.match(/\$\("#publish-payer-fail-review"\)\?\.addEventListener\("click", async \(\) => \{([\s\S]*?)\n\}\);/)?.[1] || "";
+  assert.doesNotMatch(failHandler, /deal\?\.railState !== "claimed"/);
+});
+
 test("claimed deals without a signed delivery can publish one explicit signed FAIL review", () => {
   assert.match(source, /SIGN NO-DELIVERY FAIL REVIEW/);
   assert.match(source, /makePayerNoDeliveryReview/);
