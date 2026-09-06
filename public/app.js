@@ -441,7 +441,9 @@ function recoverTrackedPayeeAccept(deal) {
   const contract = deal?.accept?.contract;
   if (!contract) return null;
   const entry = readTrackRecords().find((candidate) => {
-    if (candidate?.role !== "payee" || candidate.contract !== contract || !candidate.accept) return false;
+    if (candidate?.role !== "payee" || candidate.contract !== contract) return false;
+    if (candidate.offer?.id !== deal.offer?.id) return false;
+    if (!candidate.accept) return true;
     try { return encodeFrame(candidate.accept) === encodeFrame(deal.accept); }
     catch { return false; }
   });
