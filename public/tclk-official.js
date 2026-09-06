@@ -3450,7 +3450,14 @@ async function summarizeDealActivity(raw, offer, accept, now = Date.now()) {
       times[frame.type] = ts ?? null;
     }
   }
-  return { status: folded.state.status, room: folded.room, seqs, times };
+  return {
+    status: folded.state.status,
+    room: folded.room,
+    rail: folded.state.rail ?? null,
+    railRef: folded.state.railRef ?? null,
+    seqs,
+    times
+  };
 }
 async function listSafePaperOffers(raw, myDid, now = Date.now(), minimumFinishMs = 0) {
   const decoded = records(raw).map((record) => ({ record, frame: tryDecodeFrame(record.text || "") }));
