@@ -274,6 +274,14 @@ test("restores payer action buttons from verified state after refresh", () => {
   assert.match(source, /readIdentity\(\) && readPayerDeal\(\).*#check-payer-deal/);
 });
 
+test("opens the exact last server-verified Technocore record for visual audit", () => {
+  assert.match(source, /OPEN VERIFIED RECORD/);
+  assert.match(source, /function rememberVerifiedRecord\(deal, label, seq/);
+  assert.match(source, /lastVerifiedRecordUrl/);
+  assert.match(source, /#open-verified-record/);
+  assert.match(source, /\?since=\$\{Math\.max\(0, deal\.lastVerifiedRecordSeq - 1\)\}/);
+});
+
 test("restores any accepted payer deal from verified history without losing the current deal", () => {
   assert.match(source, /TCLK_PAYER_DEALS_KEY/);
   assert.match(source, /rememberPayerDeal\(current\)/);
