@@ -1173,13 +1173,16 @@ async function runPayerAutoSettle() {
 
 function renderPayerDeal() {
   const deal = readPayerDeal();
-  const lockSubmissionPending = deal?.state === "lock-submitted" || deal?.state === "lock-submission-opened";
+  const legacyLockSubmission = deal?.state === "lock-submitted" || deal?.state === "lock-submission-opened";
+  const verifiedState = legacyLockSubmission ? "accepted" : (deal?.state || "accepted");
   $("#open-payer-room").disabled = !deal;
   $("#check-payer-deal").disabled = !deal;
-  const claimedTerminal = deal?.state === "claimed" && deal?.railState === "claimed";
-  const refundedTerminal = deal?.state === "refunded" && deal?.railState === "refunded";
+  const claimedTerminal = verifiedState === "claimed" && deal?.railState === "claimed";
+  const refundedTerminal = verifiedState === "refunded" && deal?.railState === "refunded";
   const terminal = refundedTerminal || (claimedTerminal && claimedDeliveryApproved(deal));
-  $("#refund-payer-deal").disabled = !(deal?.state === "locked" && deal?.railState === "locked" && Date.now() >= deal.offer.refundAfterMs);
+  $("#create-paper-lock").disabled = !deal || !["accepted", "locked"].includes(verifiedState) || ["claimed", "refunded"].includes(deal?.railState);
+  $("#publish-payer-lock").disabled = !(deal && verifiedState === "accepted" && deal.railState === "locked");
+  $("#refund-payer-deal").disabled = !(verifiedState === "locked" && ["locked", "refunded"].includes(deal?.railState) && Date.now() >= deal.offer.refundAfterMs);
   $("#publish-payer-receipt").disabled = !terminal;
   const humanRejectable = deal?.deliveryReviewAllowed && deal?.deliverySeq != null && !claimedDeliveryApproved(deal);
   const failReason = $("#payer-fail-reason");
@@ -1208,7 +1211,7 @@ function renderPayerDeal() {
     $("#payer-deal-status").textContent = "No active payer deal saved in this browser.";
     return;
   }
-  const state = lockSubmissionPending ? "lock submission opened — NOT VERIFIED" : (deal.state || "accepted / lock prepared");
+  const state = verifiedState;
   const rail = deal.railState || "check required";
   const next = state === "refunded" && rail === "refunded"
     ? "NEXT: Sign the refunded terminal receipt to archive the outcome."
@@ -1224,10 +1227,8 @@ function renderPayerDeal() {
       ? `NEXT: Signed delivery failed validation — ${deal.deliveryEvaluation?.reason || "unknown reason"}. Publish a signed FAIL review.`
     : state === "claimed" && rail === "claimed"
       ? "NEXT: Verified delivery passed; sign the terminal receipt to archive the outcome."
-    : lockSubmissionPending
-      ? "NEXT: The signed lock is not confirmed on Technocore. If its tab returned 400, wait for a slot and press VERIFY & PUBLISH SIGNED LOCK again. After Technocore says ok, press VERIFY LOCK / CHECK RESULT."
     : state === "accepted" || state === "accepted / lock prepared"
-      ? "NEXT: The deal is accepted, but its signed lock is not in the deal-room transcript. Create or verify PaperRail, then press VERIFY & PUBLISH SIGNED LOCK."
+      ? `NEXT: The deal is accepted, but its signed lock is not verified in the deal-room transcript. ${rail === "locked" ? "Press VERIFY & PUBLISH SIGNED LOCK." : "Create or verify PaperRail first."}`
     : state === "claimed"
       ? "NEXT: Wait for the payee to advance PaperRail, then check again."
       : state === "locked" && rail === "locked" && Date.now() >= deal.offer.refundAfterMs
@@ -1660,43 +1661,84 @@ $("#check-tclk").addEventListener("click", async () => {
 });
 
 $("#create-paper-lock").addEventListener("click", async () => {
-  const deal = JSON.parse(localStorage.getItem(TCLK_PAYER_DEAL_KEY) || "null"); if (!deal) return;
+  const deal = readPayerDeal();
+  if (!deal) { notice("PaperRail lock blocked: no active payer deal"); return; }
+  const button = $("#create-paper-lock"); button.disabled = true;
   try {
-    const current = await fetch(`https://technocore.chat/kv/${deal.lock.note.ns}/${deal.lock.note.key}?n=${Date.now()}`);
+    const noteUrl = `https://technocore.chat/kv/${deal.lock.note.ns}/${deal.lock.note.key}`;
+    let current = await fetch(`${noteUrl}?n=${Date.now()}`, { cache: "no-store" });
     if (current.ok) {
       if (stripNoteBanner(await current.text()) !== deal.lock.value) throw new Error("PaperRail note already exists with different terms");
       deal.railState = "locked";
       saveActivePayerDeal(deal);
-      $("#publish-payer-lock").disabled = false;
       renderPayerDeal();
-      notice("Exact PaperRail lock already exists and is ready to verify");
+      notice("Exact PaperRail lock verified; signed lock is ready to publish");
       return;
     }
     if (current.status !== 404) throw new Error(`PaperRail preflight failed (${current.status})`);
     if (!window.confirm(`Create this value-free PaperRail lock with if-absent protection?\n\n${deal.lock.value}`)) return;
-    const url = `https://technocore.chat/kv/${deal.lock.note.ns}/${deal.lock.note.key}/set/${encodeURIComponent(deal.lock.value)}?if_absent=1`;
-    window.open(url, "_blank", "noopener,noreferrer");
-    $("#publish-payer-lock").disabled = false;
-    notice("PaperRail lock submission opened; verify it before publishing the signed lock frame");
-  } catch (error) { $("#tclk-live-result").textContent = `PaperRail lock blocked: ${error.message}`; }
+    const response = await fetch(`${noteUrl}/set/${encodeURIComponent(deal.lock.value)}?if_absent=1`, { cache: "no-store" });
+    if (!response.ok && response.status !== 409) throw new Error(`PaperRail creation failed (${response.status})`);
+    current = await fetch(`${noteUrl}?n=${Date.now()}`, { cache: "no-store" });
+    if (!current.ok || stripNoteBanner(await current.text()) !== deal.lock.value) throw new Error("PaperRail creation returned without a verifiable exact lock");
+    deal.railState = "locked";
+    saveActivePayerDeal(deal);
+    renderPayerDeal();
+    notice("PaperRail lock created and verified; signed lock is ready to publish");
+  } catch (error) {
+    $("#tclk-live-result").textContent = `PaperRail lock blocked: ${error.message}`;
+    notice(`PaperRail lock blocked: ${error.message}`);
+  } finally { renderPayerDeal(); }
 });
 
 $("#publish-payer-lock").addEventListener("click", async () => {
-  const identity = readIdentity(); const deal = JSON.parse(localStorage.getItem(TCLK_PAYER_DEAL_KEY) || "null");
-  if (!identity || !deal) return;
+  const identity = readIdentity(); const deal = readPayerDeal();
+  if (!identity) { notice("Signed lock blocked: restore the payer DID first"); return; }
+  if (!deal) { notice("Signed lock blocked: no active payer deal"); return; }
+  if (identity.did !== deal.offer.from) { notice("Signed lock blocked: local DID does not match the payer"); return; }
+  const button = $("#publish-payer-lock"); button.disabled = true;
   try {
     const response = await fetch(`https://technocore.chat/kv/${deal.lock.note.ns}/${deal.lock.note.key}?n=${Date.now()}`);
     if (!response.ok) throw new Error(`PaperRail read failed (${response.status})`);
     if (stripNoteBanner(await response.text()) !== deal.lock.value) throw new Error("PaperRail lock does not exactly match the signed contract terms");
+    let roomResponse = await fetch(`https://technocore.chat/r/${deal.lock.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+    if (!roomResponse.ok) throw new Error(`Deal room read failed (${roomResponse.status})`);
+    let roomPayload = await roomResponse.json();
+    const existing = await verifyExactFrameRecord(roomPayload, deal.lock.frame, deal.lock.room);
+    if (existing) {
+      deal.state = "locked"; deal.lockSeq = existing.seq; deal.lockVerifiedAt = new Date().toISOString();
+      delete deal.lockPublishReturnedOkAt;
+      saveActivePayerDeal(deal); renderPayerDeal();
+      notice(`Signed payer lock already verified at seq #${existing.seq ?? "?"}`);
+      return;
+    }
     if (!window.confirm(`PaperRail is verified. Publish this exact signed lock to /r/${deal.lock.room}?\n\n${deal.lock.line}`)) return;
     const nonce = Date.now(); const signature = await sign(identity, deal.lock.room, nonce, deal.lock.line);
-    window.open(signedUrl(deal.lock.room, identity, signature, nonce, deal.lock.line), "_blank", "noopener,noreferrer");
-    $("#tclk-live-result").textContent = `SIGNED LOCK SUBMISSION OPENED — NOT YET VERIFIED ON TECHNOCORE\nContract: ${deal.accept.contract}\nDeal room: /r/${deal.lock.room}\nPaper note: /kv/${deal.lock.note.ns}/${deal.lock.note.key}\n\n${deal.lock.line}\n\nNEXT: Confirm the opened Technocore tab says ok, then press VERIFY LOCK / CHECK RESULT. If it says 400, the signed lock was not published.`;
-    deal.state = "lock-submission-opened"; deal.railState = "locked"; deal.lockSubmittedAt = new Date().toISOString();
-    saveActivePayerDeal(deal);
-    renderPayerDeal();
-    notice("Signed payer lock opened for Technocore confirmation");
-  } catch (error) { $("#tclk-live-result").textContent = `Lock publication blocked: ${error.message}`; }
+    const publish = await fetch(signedUrl(deal.lock.room, identity, signature, nonce, deal.lock.line), { cache: "no-store" });
+    const result = clean(await publish.text());
+    if (!publish.ok && publish.status !== 422) throw new Error(`Signed lock rejected (${publish.status}${result ? `: ${result.slice(0, 120)}` : ""})`);
+    deal.lockPublishReturnedOkAt = new Date().toISOString();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt) await new Promise((resolve) => setTimeout(resolve, 500));
+      roomResponse = await fetch(`https://technocore.chat/r/${deal.lock.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+      if (!roomResponse.ok) continue;
+      roomPayload = await roomResponse.json();
+      const verified = await verifyExactFrameRecord(roomPayload, deal.lock.frame, deal.lock.room);
+      if (verified) {
+        deal.state = "locked"; deal.lockSeq = verified.seq; deal.lockVerifiedAt = new Date().toISOString();
+        delete deal.lockPublishReturnedOkAt;
+        saveActivePayerDeal(deal); renderPayerDeal();
+        notice(`Signed payer lock verified at seq #${verified.seq ?? "?"}`);
+        void syncTrackRecord({ announce: false });
+        return;
+      }
+    }
+    saveActivePayerDeal(deal); renderPayerDeal();
+    notice("Technocore accepted the signed lock, but transcript verification is still propagating. Press VERIFY & PUBLISH SIGNED LOCK again to verify without duplicating.");
+  } catch (error) {
+    $("#tclk-live-result").textContent = `Lock publication blocked: ${error.message}`;
+    notice(`Signed lock blocked: ${error.message}`);
+  } finally { renderPayerDeal(); }
 });
 
 $("#open-payer-room").addEventListener("click", () => {
@@ -1705,7 +1747,8 @@ $("#open-payer-room").addEventListener("click", () => {
 });
 
 $("#check-payer-deal").addEventListener("click", async () => {
-  const deal = readPayerDeal(); if (!deal) return;
+  const deal = readPayerDeal();
+  if (!deal) { notice("Deal check blocked: no active payer deal"); return; }
   try {
     const roomResponse = await fetch(`https://technocore.chat/r/${deal.lock.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" } });
     if (!roomResponse.ok) throw new Error(`Deal room read failed (${roomResponse.status})`);
@@ -1723,7 +1766,7 @@ $("#check-payer-deal").addEventListener("click", async () => {
     renderPayerDeal();
     notice(folded.state.status === "claimed"
       ? claimedDeliveryApproved(deal) ? "Valid reveal and approved signed delivery found" : "Reveal found, but terminal receipt is blocked by the signed-delivery gate"
-      : "No valid payee reveal yet");
+      : folded.state.status === "refunded" ? "Signed refund verified in the deal-room transcript" : folded.state.status === "locked" ? "Signed payer lock verified; no valid payee reveal yet" : "Signed payer lock is not verified in the deal-room transcript");
     void syncTrackRecord({ announce: false });
   } catch (error) {
     const pending = deal.state === "lock-submitted" || deal.state === "lock-submission-opened";
@@ -1734,7 +1777,10 @@ $("#check-payer-deal").addEventListener("click", async () => {
 $("#publish-payer-receipt").addEventListener("click", async () => {
   const identity = readIdentity(); const deal = readPayerDeal();
   const terminal = (deal?.state === "claimed" && deal?.railState === "claimed" && claimedDeliveryApproved(deal)) || (deal?.state === "refunded" && deal?.railState === "refunded");
-  if (!identity || !terminal) return;
+  if (!identity) { notice("Terminal receipt blocked: restore the payer DID first"); return; }
+  if (!deal) { notice("Terminal receipt blocked: no active payer deal"); return; }
+  if (identity.did !== deal.offer.from) { notice("Terminal receipt blocked: local DID does not match the payer"); return; }
+  if (!terminal) { notice("Terminal receipt blocked: claimed/refunded transcript and PaperRail state are not both verified"); return; }
   const button = $("#publish-payer-receipt");
   button.disabled = true;
   try {
@@ -1775,27 +1821,66 @@ $("#publish-payer-receipt").addEventListener("click", async () => {
 
 $("#refund-payer-deal").addEventListener("click", async () => {
   const identity = readIdentity(); const deal = readPayerDeal();
-  if (!identity || !deal || Date.now() < deal.offer.refundAfterMs) return;
+  if (!identity) { notice("Refund blocked: restore the payer DID first"); return; }
+  if (!deal) { notice("Refund blocked: no active payer deal"); return; }
+  if (identity.did !== deal.offer.from) { notice("Refund blocked: local DID does not match the payer"); return; }
+  if (Date.now() < deal.offer.refundAfterMs) { notice("Refund blocked: refund deadline has not passed"); return; }
+  const button = $("#refund-payer-deal"); button.disabled = true;
   try {
     const roomResponse = await fetch(`https://technocore.chat/r/${deal.lock.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" } });
     if (!roomResponse.ok) throw new Error(`Deal room read failed (${roomResponse.status})`);
-    const folded = await foldPayeeDeal(await roomResponse.json(), deal.offer, deal.accept);
+    const roomPayload = await roomResponse.json();
+    const folded = await foldPayeeDeal(roomPayload, deal.offer, deal.accept);
+    if (folded.state.status === "refunded") {
+      const refundRail = expectedPaperRefund(deal.offer, deal.accept);
+      const noteResponse = await fetch(`https://technocore.chat/kv/${refundRail.note.ns}/${refundRail.note.key}?n=${Date.now()}`, { cache: "no-store" });
+      const verifiedRail = noteResponse.ok ? classifyPaperRecord(stripNoteBanner(await noteResponse.text()), deal.offer, deal.accept) : "absent";
+      if (verifiedRail !== "refunded") throw new Error(`Refund frame exists but PaperRail is ${verifiedRail}, not refunded`);
+      deal.state = "refunded"; deal.railState = verifiedRail;
+      saveActivePayerDeal(deal); renderPayerDeal();
+      notice("Signed refund is already verified in the transcript");
+      return;
+    }
     if (folded.state.status !== "locked") throw new Error(`Refund blocked: transcript is ${folded.state.status}, not locked`);
     const refundRail = expectedPaperRefund(deal.offer, deal.accept);
     const noteResponse = await fetch(`https://technocore.chat/kv/${refundRail.note.ns}/${refundRail.note.key}?n=${Date.now()}`);
-    if (!noteResponse.ok || classifyPaperRecord(stripNoteBanner(await noteResponse.text()), deal.offer, deal.accept) !== "locked") throw new Error("Refund blocked: PaperRail is not in the expected locked state");
+    const railState = noteResponse.ok ? classifyPaperRecord(stripNoteBanner(await noteResponse.text()), deal.offer, deal.accept) : "absent";
+    if (!["locked", "refunded"].includes(railState)) throw new Error("Refund blocked: PaperRail is not in the expected locked or refunded state");
     const refund = makePayerRefund(deal.accept, identity.did);
     if (!window.confirm(`The refund deadline passed and no valid reveal exists. Refund this value-free PAPER deal and publish the signed terminal frame?\n\n${refund.line}`)) return;
-    const railUrl = `https://technocore.chat/kv/${refundRail.note.ns}/${refundRail.note.key}/set/${encodeURIComponent(refundRail.value)}?if=${encodeURIComponent(refundRail.lockedValue)}`;
-    const railResponse = await fetch(railUrl);
-    if (!railResponse.ok) throw new Error(`PaperRail refund failed (${railResponse.status})`);
+    if (railState === "locked") {
+      const railUrl = `https://technocore.chat/kv/${refundRail.note.ns}/${refundRail.note.key}/set/${encodeURIComponent(refundRail.value)}?if=${encodeURIComponent(refundRail.lockedValue)}`;
+      const railResponse = await fetch(railUrl, { cache: "no-store" });
+      if (!railResponse.ok) throw new Error(`PaperRail refund failed (${railResponse.status})`);
+      const railCheck = await fetch(`https://technocore.chat/kv/${refundRail.note.ns}/${refundRail.note.key}?n=${Date.now()}`, { cache: "no-store" });
+      const verifiedRail = railCheck.ok ? classifyPaperRecord(stripNoteBanner(await railCheck.text()), deal.offer, deal.accept) : "absent";
+      if (verifiedRail !== "refunded") throw new Error("PaperRail refund returned without a verifiable refunded state");
+    }
     const nonce = Date.now(); const signature = await sign(identity, refund.room, nonce, refund.line);
-    window.open(signedUrl(refund.room, identity, signature, nonce, refund.line), "_blank", "noopener,noreferrer");
-    deal.railState = "refunded"; deal.refundSubmittedAt = new Date().toISOString();
-    saveActivePayerDeal(deal);
-    renderPayerDeal();
-    notice("PaperRail refunded; confirm the signed refund on Technocore, then check the deal");
-  } catch (error) { $("#payer-deal-status").textContent = `${error.message}\nSaved deal data was preserved.`; }
+    const publish = await fetch(signedUrl(refund.room, identity, signature, nonce, refund.line), { cache: "no-store" });
+    const result = clean(await publish.text());
+    if (!publish.ok && publish.status !== 422) throw new Error(`Signed refund rejected (${publish.status}${result ? `: ${result.slice(0, 120)}` : ""})`);
+    deal.railState = "refunded"; deal.refundPublishReturnedOkAt = new Date().toISOString();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt) await new Promise((resolve) => setTimeout(resolve, 500));
+      const check = await fetch(`https://technocore.chat/r/${refund.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
+      if (!check.ok) continue;
+      const verified = await verifyExactFrameRecord(await check.json(), refund.frame, refund.room);
+      if (verified) {
+        deal.state = "refunded"; deal.refundSeq = verified.seq; deal.refundVerifiedAt = new Date().toISOString();
+        delete deal.refundPublishReturnedOkAt;
+        saveActivePayerDeal(deal); renderPayerDeal();
+        notice(`PaperRail and signed refund verified at seq #${verified.seq ?? "?"}`);
+        void syncTrackRecord({ announce: false });
+        return;
+      }
+    }
+    saveActivePayerDeal(deal); renderPayerDeal();
+    notice("PaperRail refunded and Technocore accepted the signed refund; transcript verification is still propagating. Press REFUND EXPIRED DEAL again to verify without duplicating.");
+  } catch (error) {
+    $("#payer-deal-status").textContent = `${error.message}\nSaved deal data was preserved.`;
+    notice(`Refund blocked: ${error.message}`);
+  } finally { renderPayerDeal(); }
 });
 
 const readPayeeDeal = () => { try { return JSON.parse(localStorage.getItem(PAYEE_DEAL_KEY)); } catch { return null; } };
@@ -2646,6 +2731,7 @@ if (readPayerAutopilot().armed) void runPayerAutopilot();
 if (readPayerAutoSettle().armed) void runPayerAutoSettle();
 if (readPayeeAutoAccept().armed) void runPayeeAutoAccept();
 if (readIdentity()) void syncTrackRecord({ announce: false });
+if (readIdentity() && readPayerDeal()) void $("#check-payer-deal").click();
 if (readPayeeDeal()) {
   const payeeDeal = readPayeeDeal();
   $("#check-payee-deal").disabled = ["auto-accept-armed", "auto-accept-expired", "auto-accept-unavailable"].includes(payeeDeal.state);
