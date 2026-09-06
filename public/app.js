@@ -1217,6 +1217,7 @@ function renderPayerDeal() {
   }
   $("#check-payer-deal").disabled = !deal;
   const claimedTerminal = verifiedState === "claimed" && deal?.railState === "claimed";
+  const claimedTranscript = verifiedState === "claimed";
   const refundedTerminal = verifiedState === "refunded" && deal?.railState === "refunded";
   const terminal = refundedTerminal || (claimedTerminal && claimedDeliveryApproved(deal));
   $("#create-paper-lock").disabled = !deal || !["accepted", "locked"].includes(verifiedState) || ["claimed", "refunded"].includes(deal?.railState);
@@ -1228,11 +1229,11 @@ function renderPayerDeal() {
   const specificReason = clean(deal?.manualDeliveryRejectionReason || "");
   if (failReason) {
     if (document.activeElement !== failReason) failReason.value = specificReason;
-    failReason.disabled = !(claimedTerminal && humanRejectable && !deal.failReviewVerifiedAt);
+    failReason.disabled = !(claimedTranscript && humanRejectable && !deal.failReviewVerifiedAt);
   }
   const validSpecificReason = specificReason.length >= 3 && specificReason.length <= 240;
-  $("#publish-payer-fail-review").disabled = !(claimedTerminal && (deterministicDeliveryFailure(deal) || (humanRejectable && validSpecificReason)) && !deal.failReviewVerifiedAt);
-  $("#publish-payer-no-delivery-review").disabled = !(claimedTerminal && deal.deliverySeq == null && !deal.noDeliveryReviewVerifiedAt);
+  $("#publish-payer-fail-review").disabled = !(claimedTranscript && (deterministicDeliveryFailure(deal) || (humanRejectable && validSpecificReason)) && !deal.failReviewVerifiedAt);
+  $("#publish-payer-no-delivery-review").disabled = !(claimedTranscript && deal.deliverySeq == null && !deal.noDeliveryReviewVerifiedAt);
   const deliveryStatus = $("#payer-delivery-status");
   const approveDelivery = $("#approve-payer-delivery");
   if (approveDelivery) {
@@ -1254,6 +1255,14 @@ function renderPayerDeal() {
   const rail = deal.railState || "check required";
   const next = state === "refunded" && rail === "refunded"
     ? "NEXT: Sign the refunded terminal receipt to archive the outcome."
+    : state === "claimed" && rail !== "claimed" && deal.noDeliveryReviewVerifiedAt
+      ? `REVIEW RECORDED: Signed no-delivery FAIL review verified at seq #${deal.noDeliveryReviewSeq ?? "?"}; PaperRail remains ${rail}.`
+    : state === "claimed" && rail !== "claimed" && deal.failReviewVerifiedAt
+      ? `REVIEW RECORDED: Signed FAIL review verified at seq #${deal.failReviewSeq ?? "?"}; PaperRail remains ${rail}.`
+    : state === "claimed" && rail !== "claimed" && deal.deliverySeq == null
+      ? "NEXT: Reveal exists without a verified signed delivery. Publish a signed no-delivery FAIL review now; PaperRail settlement remains pending."
+    : state === "claimed" && rail !== "claimed" && !claimedDeliveryApproved(deal)
+      ? "NEXT: Review and reject the failed signed delivery now; PaperRail settlement remains pending."
     : state === "claimed" && rail === "claimed" && deal.noDeliveryReviewVerifiedAt
       ? `TERMINAL: Signed no-delivery FAIL review verified at seq #${deal.noDeliveryReviewSeq ?? "?"}; no payer PASS receipt will be issued.`
     : state === "claimed" && rail === "claimed" && deal.deliverySeq == null
@@ -1302,13 +1311,13 @@ $("#payer-fail-reason")?.addEventListener("input", (event) => {
   deal.manualDeliveryRejectionReason = clean(event.target.value).slice(0, 240);
   saveActivePayerDeal(deal);
   const valid = deal.manualDeliveryRejectionReason.length >= 3;
-  $("#publish-payer-fail-review").disabled = !(deal.state === "claimed" && deal.railState === "claimed" && valid && !deal.failReviewVerifiedAt);
+  $("#publish-payer-fail-review").disabled = !(deal.state === "claimed" && valid && !deal.failReviewVerifiedAt);
 });
 
 $("#publish-payer-fail-review")?.addEventListener("click", async () => {
   const identity = readIdentity(); const deal = readPayerDeal();
   const humanRejectable = deal?.deliveryReviewAllowed && deal?.deliverySeq != null && !claimedDeliveryApproved(deal);
-  if (!identity || identity.did !== deal?.offer?.from || deal?.state !== "claimed" || deal?.railState !== "claimed" || !(deterministicDeliveryFailure(deal) || humanRejectable)) return;
+  if (!identity || identity.did !== deal?.offer?.from || deal?.state !== "claimed" || !(deterministicDeliveryFailure(deal) || humanRejectable)) return;
   try {
     const response = await fetch(`https://technocore.chat/r/${deal.lock.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
     if (!response.ok) throw new Error(`Deal room read failed (${response.status})`);
@@ -1343,7 +1352,7 @@ $("#publish-payer-fail-review")?.addEventListener("click", async () => {
 
 $("#publish-payer-no-delivery-review")?.addEventListener("click", async () => {
   const identity = readIdentity(); const deal = readPayerDeal();
-  if (!identity || identity.did !== deal?.offer?.from || deal?.state !== "claimed" || deal?.railState !== "claimed") return;
+  if (!identity || identity.did !== deal?.offer?.from || deal?.state !== "claimed") return;
   try {
     const response = await fetch(`https://technocore.chat/r/${deal.lock.room}?limit=200&format=json&n=${Date.now()}`, { headers: { accept: "application/json" }, cache: "no-store" });
     if (!response.ok) throw new Error(`Deal room read failed (${response.status})`);
