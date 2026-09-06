@@ -254,17 +254,24 @@ test("restores and advances an active payer deal after refresh", () => {
   assert.match(source, /readPayerDeal/);
   assert.match(source, /renderPayerDeal\(\)/);
   assert.match(source, /VERIFY LOCK \/ CHECK RESULT/);
-  assert.match(source, /foldPayeeDeal\(await roomResponse\.json\(\), deal\.offer, deal\.accept\)/);
+  assert.match(source, /foldPayeeDeal\(roomPayload, deal\.offer, deal\.accept\)/);
   assert.match(source, /SIGN CLAIMED RECEIPT/);
   assert.match(source, /Terminal payer receipt verified at seq/);
 });
 
-test("does not report an opened signed-lock tab as a verified lock", () => {
-  assert.match(source, /lock submission opened — NOT VERIFIED/);
-  assert.match(source, /SIGNED LOCK SUBMISSION OPENED — NOT YET VERIFIED ON TECHNOCORE/);
-  assert.match(source, /deal\.state = "lock-submission-opened"/);
-  assert.match(source, /SIGNED LOCK IS NOT CONFIRMED/);
-  assert.doesNotMatch(source, /deal\.state = "lock-submitted"/);
+test("publishes payer locks directly and reports only transcript-verified locks", () => {
+  assert.match(source, /Signed payer lock verified at seq/);
+  assert.match(source, /verifyExactFrameRecord\(roomPayload, deal\.lock\.frame, deal\.lock\.room\)/);
+  assert.match(source, /Technocore accepted the signed lock, but transcript verification is still propagating/);
+  const lockHandler = source.match(/\$\("#publish-payer-lock"\)\.addEventListener\("click", async \(\) => \{([\s\S]*?)\n\}\);/)?.[1] || "";
+  assert.doesNotMatch(lockHandler, /window\.open\(/);
+  assert.doesNotMatch(lockHandler, /deal\.state = "lock-submission-opened"/);
+});
+
+test("restores payer action buttons from verified state after refresh", () => {
+  assert.match(source, /\$\("#publish-payer-lock"\)\.disabled = !\(deal && verifiedState === "accepted" && deal\.railState === "locked"\)/);
+  assert.match(source, /const verifiedState = legacyLockSubmission \? "accepted"/);
+  assert.match(source, /readIdentity\(\) && readPayerDeal\(\).*#check-payer-deal/);
 });
 
 test("restores any accepted payer deal from verified history without losing the current deal", () => {
@@ -386,6 +393,10 @@ test("refunds an expired locked payer deal before issuing its terminal receipt",
   assert.match(source, /Date\.now\(\) >= deal\.offer\.refundAfterMs/);
   assert.match(source, /expectedPaperRefund\(deal\.offer, deal\.accept\)/);
   assert.match(source, /folded\.state\.status !== "locked"/);
+  assert.match(source, /PaperRail and signed refund verified at seq/);
+  assert.match(source, /\["locked", "refunded"\]\.includes\(railState\)/);
+  const refundHandler = source.match(/\$\("#refund-payer-deal"\)\.addEventListener\("click", async \(\) => \{([\s\S]*?)\n\}\);/)?.[1] || "";
+  assert.doesNotMatch(refundHandler, /window\.open\(/);
   assert.match(source, /SIGN TERMINAL RECEIPT/);
   assert.match(source, /\["claimed", "refunded"\]\.includes\(deal\.status\)/);
   assert.match(source, /makePayeeReceipt\(entry\.accept, entry\.offer\.from, payerReceiptOutcome\)/);
