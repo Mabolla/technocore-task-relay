@@ -302,6 +302,15 @@ test("restores any accepted payer deal from verified history without losing the 
   assert.match(source, /ACCEPT #\$\{entry\.acceptSeq/);
 });
 
+test("restores an accepted payee deal from the verified track record", () => {
+  assert.match(source, /function resumePayeeDeal\(entry\)/);
+  assert.match(source, /Payee deal cannot be resumed: its browser-local encrypted secret is unavailable/);
+  assert.match(source, /entry\.acceptSeq \?\? entry\.seqs\?\.accept/);
+  assert.match(source, /resume\.textContent = "RESUME JOB"/);
+  assert.match(source, /resume\.addEventListener\("click", \(\) => resumePayeeDeal\(entry\)\)/);
+  assert.match(source, /void \$\("#check-payee-deal"\)\.click\(\)/);
+});
+
 test("keeps expired locked payer deals resumable for refund", () => {
   assert.match(source, /expired \? "REFUND EXPIRED DEAL" : "RESUME DEAL"/);
   assert.doesNotMatch(source, /resume\.disabled = entry\.status !== "claimed" && expired/);
