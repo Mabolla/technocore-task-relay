@@ -2313,6 +2313,7 @@ function successfulTrackEntry(entry) {
 
 function statusLabel(entry) {
   if (successfulTrackEntry(entry)) return "SUCCESSFUL · DELIVERY VERIFIED";
+  if (entry.role === "payee" && entry.status === "locked" && entry.railVerified === false) return "LOCK PRESENT · RAIL UNVERIFIED";
   if (entry.noDeliveryRejected) return "CLAIMED · NO DELIVERY · REJECTED";
   if (entry.deliveryRejected) return "CLAIMED · DELIVERY REJECTED";
   if (entry.status === "claimed" && entry.deliveryVerified === true && !entry.payerReceiptVerified) return "CLAIMED · DELIVERY VERIFIED · PAYER RECEIPT PENDING";
@@ -2461,6 +2462,16 @@ async function syncTrackRecord({ announce = true } = {}) {
           roomPayload = await roomResponse.json();
           const deal = await summarizeDealActivity(roomPayload, entry.offer, entry.accept);
           entry.status = deal.status; entry.seqs = { ...entry.seqs, ...deal.seqs };
+          if (entry.role === "payee" && ["locked", "claimed"].includes(deal.status)) {
+            const expected = expectedPaperLock(entry.offer, entry.accept);
+            entry.railVerified = false;
+            if (deal.rail === "paper" && deal.railRef === expected.ref) {
+              const noteResponse = await fetch(`https://technocore.chat/kv/${expected.note.ns}/${expected.note.key}?n=${Date.now()}`);
+              const noteValue = noteResponse.ok ? stripNoteBanner(await noteResponse.text()) : "";
+              const paperState = classifyPaperRecord(noteValue, entry.offer, entry.accept);
+              entry.railVerified = paperState === "locked" || paperState === "claimed";
+            }
+          }
           const deliveryRoom = resolveDeliveryRoom(entry.jobText || "", entry.room, rememberedExternalRoom);
           let deliveryPayload = roomPayload;
           if (deliveryRoom !== entry.room) {
