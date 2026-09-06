@@ -332,6 +332,17 @@ test("reconciles terminal and expired no-lock payee jobs out of the active queue
   assert.match(source, /setInterval\(\(\) => \{ void reconcilePayeeDealQueue\(\); \}, 30_000\)/);
 });
 
+test("archives expired unverifiable payee rails without deleting retained deal evidence", () => {
+  assert.match(source, /function archiveInvalidRailPayeeDeal\(deal, reason\)/);
+  assert.match(source, /deal\.state = "invalid-rail-archived"/);
+  assert.match(source, /rememberPayeeDeal\(deal\)/);
+  assert.match(source, /folded\.state\.status === "locked" && Date\.now\(\) >= Number\(deal\.offer\?\.refundAfterMs/);
+  assert.match(source, /folded\.state\.rail === "paper" && folded\.state\.railRef === expected\.ref/);
+  assert.match(source, /Refund deadline passed without a verifiable contract-bound PaperRail lock/);
+  assert.match(source, /INVALID RAIL · ARCHIVED/);
+  assert.match(source, /"invalid-rail-archived"\]\.includes\(deal\.state\)/);
+});
+
 test("auto-publishes saved payer locks only after a fresh server-created room event", () => {
   assert.match(source, /PAYER LOCK AUTO-PUBLISH · LOCAL KEY ONLY/);
   assert.match(source, /ARM PAYER AUTO-PUBLISH/);
