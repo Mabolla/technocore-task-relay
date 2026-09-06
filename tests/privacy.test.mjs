@@ -223,6 +223,15 @@ test("queues up to three accepted payee jobs without overwriting their secrets",
   assert.match(source, /PARK ACTIVE DEAL & ARM AUTO-JOB HUNTER/);
 });
 
+test("recovers a verified payee accept from retained track history", () => {
+  assert.match(source, /function recoverTrackedPayeeAccept\(deal\)/);
+  assert.match(source, /candidate\?\.role !== "payee"/);
+  assert.match(source, /encodeFrame\(candidate\.accept\) === encodeFrame\(deal\.accept\)/);
+  assert.match(source, /entry\?\.acceptSeq \?\? entry\?\.seqs\?\.accept/);
+  assert.match(source, /recoverTrackedPayeeAccept\(deal\)[\s\S]*verifyAcceptRecord\(await readOfferWindow/);
+  assert.match(source, /QUEUE CAPACITY AVAILABLE/);
+});
+
 test("prioritizes payers with globally verified lock history without excluding unknown payers", () => {
   assert.match(source, /PAYER_LOCK_PRIORITY_KEY/);
   assert.match(source, /listRecentAcceptedPayerDeals/);
