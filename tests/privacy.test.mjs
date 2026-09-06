@@ -302,6 +302,12 @@ test("restores any accepted payer deal from verified history without losing the 
   assert.match(source, /ACCEPT #\$\{entry\.acceptSeq/);
 });
 
+test("resumes a verified claimed delivery when its payer receipt is pending", () => {
+  assert.match(source, /const claimedNeedsPayerAction = entry\.status === "claimed"/);
+  assert.match(source, /!entry\.deliveryVerified \|\| !entry\.payerReceiptVerified/);
+  assert.match(source, /entry\.deliveryVerified \? "SIGN PAYER RECEIPT" : "REVIEW DELIVERY"/);
+});
+
 test("restores an accepted payee deal from the verified track record", () => {
   assert.match(source, /function resumePayeeDeal\(entry\)/);
   assert.match(source, /Payee deal cannot be resumed: its browser-local encrypted secret is unavailable/);
