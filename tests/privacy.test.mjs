@@ -226,7 +226,7 @@ test("queues up to three accepted payee jobs without overwriting their secrets",
 test("recovers a verified payee accept from retained track history", () => {
   assert.match(source, /function recoverTrackedPayeeAccept\(deal\)/);
   assert.match(source, /candidate\?\.role !== "payee"/);
-  assert.match(source, /candidate\.offer\?\.id !== deal\.offer\?\.id/);
+  assert.match(source, /candidate\.offer\?\.id && deal\.offer\?\.id && candidate\.offer\.id !== deal\.offer\.id/);
   assert.match(source, /if \(!candidate\.accept\) return true/);
   assert.match(source, /encodeFrame\(candidate\.accept\) === encodeFrame\(deal\.accept\)/);
   assert.match(source, /entry\?\.acceptSeq \?\? entry\?\.seqs\?\.accept/);
