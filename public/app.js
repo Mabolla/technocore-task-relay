@@ -184,7 +184,7 @@ function forgetPayeeDeal(contract) {
 }
 
 function queuedPayeeDeals() {
-  return Object.values(readPayeeDeals()).filter((deal) => deal?.accept?.contract && deal.acceptSeq && !["refunded", "cancelled", "abandoned"].includes(deal.state));
+  return Object.values(readPayeeDeals()).filter((deal) => deal?.accept?.contract && deal.acceptSeq && !["refunded", "cancelled", "abandoned", "invalid-rail-archived"].includes(deal.state));
 }
 
 function activePayeeDeals() {
@@ -206,6 +206,21 @@ function removePayeeDealFromActiveQueue(deal) {
   }
 }
 
+function archiveInvalidRailPayeeDeal(deal, reason) {
+  const contract = deal?.accept?.contract;
+  if (!contract) return;
+  deal.state = "invalid-rail-archived";
+  deal.archivedAt = new Date().toISOString();
+  deal.archiveReason = reason;
+  rememberPayeeDeal(deal);
+  if (readPayeeDeal()?.accept?.contract === contract) {
+    localStorage.removeItem(PAYEE_DEAL_KEY);
+    resetPayeeUi();
+    renderPayeeAutoAccept();
+    renderPayeeJobNote();
+  }
+}
+
 async function reconcilePayeeDealQueue() {
   const identity = readIdentity();
   const deals = queuedPayeeDeals();
@@ -217,6 +232,22 @@ async function reconcilePayeeDealQueue() {
       if (!response.ok) return;
       const payload = await response.json();
       const folded = await foldPayeeDeal(payload, deal.offer, deal.accept);
+      if (folded.state.status === "locked" && Date.now() >= Number(deal.offer?.refundAfterMs || 0)) {
+        const expected = expectedPaperLock(deal.offer, deal.accept);
+        let railVerified = folded.state.rail === "paper" && folded.state.railRef === expected.ref;
+        if (railVerified) {
+          const noteResponse = await fetch(`https://technocore.chat/kv/${expected.note.ns}/${expected.note.key}?n=${Date.now()}`, {
+            cache: "no-store", signal: AbortSignal.timeout(4_000),
+          });
+          const noteValue = noteResponse.ok ? stripNoteBanner(await noteResponse.text()) : "";
+          const paperState = classifyPaperRecord(noteValue, deal.offer, deal.accept);
+          railVerified = paperState === "locked" || paperState === "claimed";
+        }
+        if (!railVerified) {
+          archiveInvalidRailPayeeDeal(deal, "Refund deadline passed without a verifiable contract-bound PaperRail lock");
+          return;
+        }
+      }
       if (["refunded", "cancelled"].includes(folded.state.status)) {
         removePayeeDealFromActiveQueue(deal);
         return;
@@ -452,6 +483,7 @@ function recoverTrackedPayeeAccept(deal) {
 }
 
 function payeeQueueLabel(deal) {
+  if (deal.state === "invalid-rail-archived") return "INVALID RAIL · ARCHIVED";
   if (["accepted", "accepted-room-pending"].includes(deal.state) && Date.now() >= Number(deal.offer?.claimByMs || 0)) return "DEADLINE PASSED · NO LOCAL LOCK";
   if (deal.state === "locked") return "LOCKED · READY TO WORK";
   if (deal.state === "accepted") return deal.lockValid ? "LOCKED · READY TO WORK" : "ACCEPTED · WAITING FOR LOCK";
