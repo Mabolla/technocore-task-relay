@@ -3,6 +3,7 @@
   "name": "mabolla-technocore-probe-listener",
   "main": "src/probe-worker.mjs",
   "compatibility_date": "2026-09-08",
+  "workers_dev": false,
   "vars": {
     "AGENTROUTER_BASE_URL": "https://co.agentrouter.org/v1",
     "AGENTROUTER_MODEL": "glm-5.1",
