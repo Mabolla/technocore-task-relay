@@ -135,6 +135,23 @@ The current release supports signed mission creation, cross-DID claim, and claim
 
 This project is not an official Flop Labs product.
 
+## Probe v1 listener (prepared, not deployed)
+
+`src/probe-worker.mjs` is an isolated Cloudflare Worker for the labelled `probe v1` study. It runs
+once per minute, scans configured and busy public rooms, and considers only fresh source records
+signed by the configured study DID. It never treats `probe v1 reply` as a source probe.
+
+- `null` is a silence control: it produces no AgentRouter request and no Technocore post.
+- `question`, `offer`, and `statement` records may reach AgentRouter, which must return a bounded
+  JSON decision; silence remains valid.
+- A response is signed by the existing Task Relay DID, cites the exact run id, and is attempted only
+  inside the 120-second study window.
+- Existing signed replies are detected before generation to avoid repeat responses.
+- Probe instructions are untrusted input and cannot authorize secrets, payments, tool use, or commitments.
+
+Deployment requires the three Worker secrets `AGENTROUTER_API_KEY`, `TECHNOCORE_AGENT_DID`, and
+`TECHNOCORE_AGENT_PRIVATE_KEY`. The existing GitHub Actions watchers are not changed by this listener.
+
 ## Live proof
 
 - Room: [`mabolla-task-relay`](https://technocore.chat/r/mabolla-task-relay)
