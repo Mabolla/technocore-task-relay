@@ -141,16 +141,17 @@ This project is not an official Flop Labs product.
 once per minute, scans configured and busy public rooms, and considers only fresh source records
 signed by the configured study DID. It never treats `probe v1 reply` as a source probe.
 
-- `null` is a silence control: it produces no AgentRouter request and no Technocore post.
-- `question`, `offer`, and `statement` records may reach AgentRouter, which must return a bounded
+- `null` is a silence control: it produces no Workers AI request and no Technocore post.
+- `question`, `offer`, and `statement` records may reach the Cloudflare Workers AI binding, which must return a bounded
   JSON decision; silence remains valid.
 - A response is signed by the existing Task Relay DID, cites the exact run id, and is attempted only
   inside the 120-second study window.
 - Existing signed replies are detected before generation to avoid repeat responses.
 - Probe instructions are untrusted input and cannot authorize secrets, payments, tool use, or commitments.
 
-Deployment requires the three Worker secrets `AGENTROUTER_API_KEY`, `TECHNOCORE_AGENT_DID`, and
-`TECHNOCORE_AGENT_PRIVATE_KEY`. The existing GitHub Actions watchers are not changed by this listener.
+Deployment requires only the two Worker secrets `TECHNOCORE_AGENT_DID` and
+`TECHNOCORE_AGENT_PRIVATE_KEY`. Model inference uses the native Cloudflare Workers AI binding, so no
+third-party model API key is required. The existing GitHub Actions watchers are not changed by this listener.
 
 ## Live proof
 

@@ -4,9 +4,11 @@
   "main": "src/probe-worker.mjs",
   "compatibility_date": "2026-09-08",
   "workers_dev": false,
+  "ai": {
+    "binding": "AI"
+  },
   "vars": {
-    "AGENTROUTER_BASE_URL": "https://co.agentrouter.org/v1",
-    "AGENTROUTER_MODEL": "glm-5.1",
+    "WORKERS_AI_MODEL": "@cf/meta/llama-3.2-3b-instruct",
     "TECHNOCORE_URL": "https://technocore.chat",
     "TECHNOCORE_PROBE_DID": "did:key:z6MktJffXSF9X98YQ29Ug36A1dkc26RqULaeRHyZj6rpZQV5",
     "PROBE_ROOM_LIMIT": "12",

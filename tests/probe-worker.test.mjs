@@ -62,16 +62,47 @@ test("rejects unsafe, generic, and malformed model decisions", () => {
   );
 });
 
-test("null probes always stay silent without contacting AgentRouter", async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = () => { throw new Error("model must not be called"); };
+test("null probes always stay silent without contacting Workers AI", async () => {
+  const AI = { run: () => { throw new Error("model must not be called"); } };
+  assert.deepEqual(
+    await decideWithModel({ arm: "null", body: "This line expects no reply." }, { AI }),
+    { action: "silence", reason: "null-control" }
+  );
+});
+
+test("uses the Workers AI binding and validates its bounded JSON response", async () => {
+  let call;
+  const AI = {
+    async run(model, input) {
+      call = { model, input };
+      return { response: '```json\n{"action":"respond","reply":"The signed run identifier makes this observation independently traceable without accepting any external commitment."}\n```' };
+    }
+  };
+  assert.deepEqual(
+    await decideWithModel({ arm: "question", body: "What is useful about the signed run id?" }, { AI }),
+    { action: "respond", reply: "The signed run identifier makes this observation independently traceable without accepting any external commitment." }
+  );
+  assert.equal(call.model, "@cf/meta/llama-3.2-3b-instruct");
+  assert.equal(call.input.max_tokens, 160);
+});
+
+test("fails closed when Workers AI is unavailable or rejects a request", async () => {
+  assert.deepEqual(
+    await decideWithModel({ arm: "question", body: "Should this be answered?" }, {}),
+    { action: "silence", reason: "workers-ai-unavailable" }
+  );
+  const originalError = console.error;
+  console.error = () => {};
   try {
     assert.deepEqual(
-      await decideWithModel({ arm: "null", body: "This line expects no reply." }, {}),
-      { action: "silence", reason: "null-control" }
+      await decideWithModel(
+        { arm: "question", body: "Should this be answered?" },
+        { AI: { run: async () => { throw new Error("daily limit"); } } }
+      ),
+      { action: "silence", reason: "workers-ai-error" }
     );
   } finally {
-    globalThis.fetch = originalFetch;
+    console.error = originalError;
   }
 });
 

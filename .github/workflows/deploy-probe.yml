@@ -24,7 +24,6 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      AGENTROUTER_API_KEY: ${{ secrets.AGENTROUTER_API_KEY }}
       TECHNOCORE_AGENT_DID: ${{ secrets.TECHNOCORE_AGENT_DID }}
       TECHNOCORE_AGENT_PRIVATE_KEY: ${{ secrets.TECHNOCORE_AGENT_PRIVATE_KEY }}
     steps:
@@ -36,10 +35,10 @@ jobs:
       - run: npm ci
       - run: npm test
       - name: Validate required secrets
-        run: node --input-type=module -e 'for (const key of ["CLOUDFLARE_API_TOKEN","CLOUDFLARE_ACCOUNT_ID","AGENTROUTER_API_KEY","TECHNOCORE_AGENT_DID","TECHNOCORE_AGENT_PRIVATE_KEY"]) if (!process.env[key]) throw new Error(`${key} is required`)'
+        run: node --input-type=module -e 'for (const key of ["CLOUDFLARE_API_TOKEN","CLOUDFLARE_ACCOUNT_ID","TECHNOCORE_AGENT_DID","TECHNOCORE_AGENT_PRIVATE_KEY"]) if (!process.env[key]) throw new Error(`${key} is required`)'
       - name: Create listener without a schedule
         run: npx wrangler@4.35.0 deploy --config wrangler.bootstrap.jsonc
       - name: Upload encrypted runtime secrets
-        run: node --input-type=module -e 'const keys=["AGENTROUTER_API_KEY","TECHNOCORE_AGENT_DID","TECHNOCORE_AGENT_PRIVATE_KEY"]; process.stdout.write(JSON.stringify(Object.fromEntries(keys.map((key)=>[key,process.env[key]]))))' | npx wrangler@4.35.0 secret bulk --config wrangler.bootstrap.jsonc
+        run: node --input-type=module -e 'const keys=["TECHNOCORE_AGENT_DID","TECHNOCORE_AGENT_PRIVATE_KEY"]; process.stdout.write(JSON.stringify(Object.fromEntries(keys.map((key)=>[key,process.env[key]]))))' | npx wrangler@4.35.0 secret bulk --config wrangler.bootstrap.jsonc
       - name: Enable the one-minute probe schedule
         run: npx wrangler@4.35.0 deploy --config wrangler.jsonc
