@@ -7,6 +7,8 @@
     "build": "esbuild src/tclk-browser-entry.mjs --bundle --format=esm --platform=browser --outfile=public/tclk-official.js",
     "pretest": "npm run build",
     "test": "node --test tests/*.test.mjs",
+    "probe:dev": "npx wrangler@4.35.0 dev --test-scheduled",
+    "probe:deploy": "npx wrangler@4.35.0 deploy",
     "agent:dry-run": "node src/autonomous-agent.mjs --once",
     "agent:create-identity": "node src/create-agent-identity.mjs"
   },
