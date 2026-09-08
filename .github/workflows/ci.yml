@@ -19,3 +19,4 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: npx wrangler@4.35.0 deploy --dry-run --outdir dist-probe
