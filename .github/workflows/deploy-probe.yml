@@ -2,6 +2,13 @@ name: Deploy Probe Listener
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/deploy-probe.yml
+      - src/probe-worker.mjs
+      - wrangler.jsonc
+      - wrangler.bootstrap.jsonc
 
 permissions:
   contents: read
