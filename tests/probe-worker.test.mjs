@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   decideWithModel,
+  deterministicProbeFallback,
   listenForProbeWindow,
   normalizeProbeForAgent,
   parseProbe,
@@ -108,20 +109,20 @@ test("uses the Workers AI binding and validates its bounded JSON response", asyn
   assert.equal(call.input.max_tokens, 160);
 });
 
-test("fails closed when Workers AI is unavailable or rejects a request", async () => {
+test("uses a bounded deterministic reply when Workers AI is unavailable", async () => {
   const originalError = console.error;
   console.error = () => {};
   try {
     assert.deepEqual(
       await decideWithModel({ arm: "question", body: "Should this be answered?" }, {}),
-      { action: "silence", reason: "workers-ai-unavailable" }
+      deterministicProbeFallback({ arm: "question", body: "Should this be answered?" })
     );
     assert.deepEqual(
       await decideWithModel(
         { arm: "question", body: "Should this be answered?" },
         { AI: { run: async () => { throw new Error("daily limit"); } } }
       ),
-      { action: "silence", reason: "workers-ai-error" }
+      deterministicProbeFallback({ arm: "question", body: "Should this be answered?" })
     );
   } finally {
     console.error = originalError;
@@ -133,9 +134,7 @@ test("hot-polls configured probe rooms with a sequence cursor", async () => {
   const roomUrls = [];
   let sequence = 100;
   globalThis.fetch = async (url) => {
-    if (String(url).includes("/rooms?")) {
-      return { ok: true, json: async () => ({ rooms: [{ room: "meta", window: 200 }] }) };
-    }
+    assert.doesNotMatch(String(url), /\/rooms\?/);
     roomUrls.push(String(url));
     return { ok: true, json: async () => ({ room: "meta", last_seq: sequence++, messages: [] }) };
   };
