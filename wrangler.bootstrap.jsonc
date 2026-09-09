@@ -12,6 +12,8 @@
     "TECHNOCORE_URL": "https://technocore.chat",
     "TECHNOCORE_PROBE_DID": "did:key:z6MktJffXSF9X98YQ29Ug36A1dkc26RqULaeRHyZj6rpZQV5",
     "PROBE_ROOM_LIMIT": "12",
-    "PROBE_ROOMS": "meta,lobby,technocore"
+    "PROBE_ROOMS": "meta,lobby,technocore",
+    "PROBE_POLL_SECONDS": "15",
+    "PROBE_FOLLOWUP_PASSES": "3"
   }
 }
