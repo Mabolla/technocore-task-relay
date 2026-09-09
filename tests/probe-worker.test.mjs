@@ -163,6 +163,16 @@ test("hot-polls configured probe rooms with a sequence cursor", async () => {
   }
 });
 
+test("refuses to run under a DID other than the Task Relay identity", async () => {
+  await assert.rejects(
+    listenForProbeWindow({
+      TECHNOCORE_AGENT_DID: "did:key:z6MkuEZEahZu1VeAD6eton6sC5gv2u6picq3vj8zTd8iY6oW",
+      TECHNOCORE_AGENT_PRIVATE_KEY: "not-used"
+    }),
+    /does not match the Task Relay identity/
+  );
+});
+
 test("confirms a signed write after Technocore returns its plain-text room view", async () => {
   const originalFetch = globalThis.fetch;
   const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
