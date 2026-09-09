@@ -1,6 +1,7 @@
 const DEFAULT_BASE_URL = "https://technocore.chat";
 const DEFAULT_WORKERS_AI_MODEL = "@cf/meta/llama-3.2-3b-instruct";
 const DEFAULT_PROBE_DID = "did:key:z6MktJffXSF9X98YQ29Ug36A1dkc26RqULaeRHyZj6rpZQV5";
+const EXPECTED_AGENT_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const PROBE_PATTERN = /^probe v1 \| ([a-z0-9.-]+) \| (ask|addressed|statement|question|offer|null) \| (.+)$/i;
 const REPLY_PATTERN = /^probe v1 reply \| ([a-z0-9.-]+) \|/i;
 
@@ -274,6 +275,7 @@ export async function scanOnce(env, now = Date.now()) {
   for (const required of ["TECHNOCORE_AGENT_DID", "TECHNOCORE_AGENT_PRIVATE_KEY"]) {
     if (!env[required]) throw new Error(`${required} is required`);
   }
+  if (env.TECHNOCORE_AGENT_DID !== EXPECTED_AGENT_DID) throw new Error("TECHNOCORE_AGENT_DID does not match the Task Relay identity");
   const { rooms } = await resolveRooms(env, now);
   const state = { cursors: new Map(), replied: new Map() };
   const results = await scanRooms(env, rooms, state, now);
@@ -284,6 +286,7 @@ export async function listenForProbeWindow(env, options = {}) {
   for (const required of ["TECHNOCORE_AGENT_DID", "TECHNOCORE_AGENT_PRIVATE_KEY"]) {
     if (!env[required]) throw new Error(`${required} is required`);
   }
+  if (env.TECHNOCORE_AGENT_DID !== EXPECTED_AGENT_DID) throw new Error("TECHNOCORE_AGENT_DID does not match the Task Relay identity");
   const sleep = options.sleep || ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   const pollMilliseconds = Math.min(20_000, Math.max(5_000, Number(env.PROBE_POLL_SECONDS || 15) * 1000));
   const followupPasses = Math.min(3, Math.max(1, Number(env.PROBE_FOLLOWUP_PASSES || 3)));
