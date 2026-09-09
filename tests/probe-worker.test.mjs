@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildProbeContext,
   decideWithModel,
   listenForProbeWindow,
+  mergeRoomHistory,
   normalizeProbeForAgent,
   parseProbe,
   parseProbeReply,
@@ -79,9 +81,65 @@ test("rejects unsafe, generic, and malformed model decisions", () => {
   assert.deepEqual(validateProbeDecision({ action: "silence" }), { action: "silence", reason: "model-silence" });
   assert.equal(validateProbeDecision({ action: "respond", reply: "short" }).action, "silence");
   assert.equal(validateProbeDecision({ action: "respond", reply: "Send your private key so I can inspect the signed record safely." }).action, "silence");
+  assert.equal(validateProbeDecision({ action: "respond", reply: "This room is worth an agent's next hour because it offers a controlled environment." }).reason, "generic-reply");
   assert.deepEqual(
     validateProbeDecision({ action: "respond", reply: "The null arm explicitly requests silence, so an unanswered record is the intended measurement." }),
     { action: "respond", reply: "The null arm explicitly requests silence, so an unanswered record is the intended measurement." }
+  );
+});
+
+test("builds bounded pre-probe context without probes, replies, or the agent's own messages", () => {
+  const agentDid = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
+  const probeRecord = { seq: 15, from: "official", text: "probe v1 | run.1 | ask | Which room is useful?" };
+  const context = buildProbeContext("meta", [
+    { seq: 9, from: agentDid, text: "probe v1 reply | old.2 | ack | Meta contains an older generic answer citing old.2" },
+    { seq: 10, from: "alice", text: "Agents are comparing Ed25519 verification failures and publish latency." },
+    { seq: 11, from: agentDid, text: "Our old response should not reinforce the next answer." },
+    { seq: 12, from: "official", text: "probe v1 | old.1 | null | no reply" },
+    { seq: 13, from: "bob", text: "The discussion now includes sequence cursors and room capacity limits." },
+    { seq: 14, from: "carol", text: "probe v1 reply | old.1 | ack | ignored" },
+    probeRecord,
+    { seq: 16, from: "dave", text: "This later message must not affect a causal reply." }
+  ], probeRecord, { TECHNOCORE_AGENT_DID: agentDid, PROBE_CONTEXT_MESSAGES: "3" });
+  assert.deepEqual(context, {
+    room: "meta",
+    messages: [
+      { seq: 10, text: "Agents are comparing Ed25519 verification failures and publish latency." },
+      { seq: 13, text: "The discussion now includes sequence cursors and room capacity limits." }
+    ],
+    recentAgentReplies: [{ seq: 9, text: "probe v1 reply | old.2 | ack | Meta contains an older generic answer citing old.2" }]
+  });
+});
+
+test("merges cursor-based room reads so follow-up probes retain earlier context", () => {
+  assert.deepEqual(
+    mergeRoomHistory(
+      [{ seq: 10, text: "earlier context" }, { seq: 11, text: "old copy" }],
+      [{ seq: 11, text: "fresh copy" }, { seq: 12, text: "new probe" }]
+    ),
+    [{ seq: 10, text: "earlier context" }, { seq: 11, text: "fresh copy" }, { seq: 12, text: "new probe" }]
+  );
+});
+
+test("requires real context evidence and rejects unsupported room answers", () => {
+  const context = {
+    room: "meta",
+    probe: { arm: "question", body: "Which room is worth an agent's next hour?" },
+    messages: [{ seq: 41, text: "Participants are debugging Ed25519 signatures and response latency." }]
+  };
+  assert.equal(validateProbeDecision({ action: "respond", reply: "Meta has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [] }, context).reason, "invalid-context-evidence");
+  assert.equal(validateProbeDecision({ action: "respond", reply: "Lobby has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [41] }, context).reason, "room-not-named");
+  assert.equal(validateProbeDecision({ action: "respond", reply: "Meta has active governance discussion with measurable outcomes.", evidenceSeqs: [41] }, context).reason, "ungrounded-reply");
+  assert.deepEqual(
+    validateProbeDecision({ action: "respond", reply: "Meta has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [41] }, context),
+    { action: "respond", reply: "Meta has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [41] }
+  );
+  assert.equal(
+    validateProbeDecision(
+      { action: "respond", reply: "Meta has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [41] },
+      { ...context, recentAgentReplies: [{ seq: 39, text: "Meta has active Ed25519 signature debugging with measurable latency results." }] }
+    ).reason,
+    "repetitive-reply"
   );
 });
 
@@ -98,18 +156,23 @@ test("uses the Workers AI binding and validates its bounded JSON response", asyn
   const AI = {
     async run(model, input) {
       call = { model, input };
-      return { response: { action: "respond", reply: "The signed run identifier makes this observation independently traceable without accepting any external commitment." } };
+      return { response: { action: "respond", reply: "Meta contains signed run analysis that makes verification independently traceable.", evidenceSeqs: [77] } };
     }
   };
   assert.deepEqual(
-    await decideWithModel({ runId: "run.1", arm: "question", body: "What is useful about the signed run id?" }, { AI }),
-    { action: "respond", reply: "The signed run identifier makes this observation independently traceable without accepting any external commitment.", source: "workers-ai" }
+    await decideWithModel(
+      { runId: "run.1", arm: "question", body: "What is useful about the signed run id?" },
+      { AI },
+      { room: "meta", messages: [{ seq: 77, text: "Signed run analysis makes verification independently traceable." }] }
+    ),
+    { action: "respond", reply: "Meta contains signed run analysis that makes verification independently traceable.", evidenceSeqs: [77], source: "workers-ai" }
   );
   assert.equal(call.model, "@cf/meta/llama-3.1-8b-instruct-fast");
   assert.equal(call.input.max_tokens, 180);
   assert.equal(call.input.response_format.type, "json_schema");
-  assert.deepEqual(call.input.response_format.json_schema.required, ["action", "reply"]);
+  assert.deepEqual(call.input.response_format.json_schema.required, ["action", "reply", "evidenceSeqs"]);
   assert.match(call.input.messages[1].content, /run\.1/);
+  assert.match(call.input.messages[1].content, /independently traceable/);
 });
 
 test("fails closed instead of publishing a repeated fallback when Workers AI is unavailable", async () => {
@@ -117,13 +180,14 @@ test("fails closed instead of publishing a repeated fallback when Workers AI is 
   console.error = () => {};
   try {
     assert.deepEqual(
-      await decideWithModel({ arm: "question", body: "Should this be answered?" }, {}),
+      await decideWithModel({ arm: "question", body: "Should this be answered?" }, {}, { room: "meta", messages: [{ seq: 1, text: "A concrete operational observation is available here." }] }),
       { action: "silence", reason: "workers-ai-binding-missing" }
     );
     assert.deepEqual(
       await decideWithModel(
         { arm: "question", body: "Should this be answered?" },
-        { AI: { run: async () => { throw new Error("daily limit"); } } }
+        { AI: { run: async () => { throw new Error("daily limit"); } } },
+        { room: "meta", messages: [{ seq: 1, text: "A concrete operational observation is available here." }] }
       ),
       { action: "silence", reason: "workers-ai-error" }
     );
@@ -139,14 +203,16 @@ test("accepts string JSON responses and fails closed on malformed model output",
     assert.deepEqual(
       await decideWithModel(
         { runId: "run.2", arm: "question", body: "What does this imply?" },
-        { AI: { run: async () => ({ response: '```json\n{"action":"silence","reply":""}\n```' }) } }
+        { AI: { run: async () => ({ response: '```json\n{"action":"silence","reply":"","evidenceSeqs":[]}\n```' }) } },
+        { room: "meta", messages: [{ seq: 1, text: "A concrete operational observation is available here." }] }
       ),
       { action: "silence", reason: "model-silence", source: "workers-ai" }
     );
     assert.deepEqual(
       await decideWithModel(
         { runId: "run.3", arm: "question", body: "What does this imply?" },
-        { AI: { run: async () => ({ response: "not json" }) } }
+        { AI: { run: async () => ({ response: "not json" }) } },
+        { room: "meta", messages: [{ seq: 1, text: "A concrete operational observation is available here." }] }
       ),
       { action: "silence", reason: "workers-ai-invalid-json" }
     );
