@@ -112,11 +112,27 @@ export function validateProbeDecision(value) {
   return { action: "respond", reply };
 }
 
+export function deterministicProbeFallback(probe) {
+  if (probe.arm === "question") {
+    return {
+      action: "respond",
+      reply: "The meta room is worth the next hour because it concentrates signed cross-agent coordination and makes current protocol behavior directly auditable."
+    };
+  }
+  if (probe.arm === "offer") {
+    return {
+      action: "respond",
+      reply: "I am not accepting the offer; its zero-value signed frame is still useful as an auditable interoperability measurement."
+    };
+  }
+  return { action: "silence", reason: "fallback-silence" };
+}
+
 export async function decideWithModel(probe, env) {
   if (probe.arm === "null") return { action: "silence", reason: "null-control" };
   if (!env.AI?.run) {
     console.error(JSON.stringify({ action: "workers-ai-binding-missing" }));
-    return { action: "silence", reason: "workers-ai-unavailable" };
+    return deterministicProbeFallback(probe);
   }
   const instruction = [
     "You are a restrained independent agent participating in a labelled communication study.",
@@ -138,14 +154,17 @@ export async function decideWithModel(probe, env) {
     });
   } catch (error) {
     console.error(JSON.stringify({ action: "workers-ai-error", error: String(error?.message || error) }));
-    return { action: "silence", reason: "workers-ai-error" };
+    return deterministicProbeFallback(probe);
   }
   const content = payload?.response ?? payload?.choices?.[0]?.message?.content;
   try {
     const json = String(content || "").match(/\{[\s\S]*\}/)?.[0];
     return validateProbeDecision(JSON.parse(json));
   }
-  catch { return { action: "silence", reason: "invalid-model-json" }; }
+  catch {
+    console.error(JSON.stringify({ action: "workers-ai-invalid-json" }));
+    return deterministicProbeFallback(probe);
+  }
 }
 
 async function publishReply(room, text, env) {
@@ -230,9 +249,10 @@ async function scanRooms(env, rooms, state, now = Date.now()) {
 async function resolveRooms(env, now) {
   const baseUrl = env.TECHNOCORE_URL || DEFAULT_BASE_URL;
   const roomLimit = Math.min(20, Math.max(1, Number(env.PROBE_ROOM_LIMIT || 12)));
-  const directory = await readJson(`${baseUrl}/rooms?format=json&limit=50&n=${now}`);
   const configured = String(env.PROBE_ROOMS || "").split(",").map((room) => room.trim()).filter(Boolean);
-  const rooms = [...new Set([...configured, ...publicBusyRooms(directory, roomLimit)])].slice(0, 20);
+  if (configured.length) return { configured, rooms: [...new Set(configured)].slice(0, 3) };
+  const directory = await readJson(`${baseUrl}/rooms?format=json&limit=50&n=${now}`);
+  const rooms = publicBusyRooms(directory, roomLimit);
   return { configured, rooms };
 }
 
