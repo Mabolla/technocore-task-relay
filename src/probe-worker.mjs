@@ -167,17 +167,31 @@ export async function decideWithModel(probe, env) {
   }
 }
 
-async function publishReply(room, text, env) {
+export async function publishReply(room, text, env) {
   const nonce = Date.now();
   const sig = await signText(room, String(nonce), text, env.TECHNOCORE_AGENT_PRIVATE_KEY);
-  const response = await fetch(`${env.TECHNOCORE_URL || DEFAULT_BASE_URL}/r/${encodeURIComponent(room)}`, {
+  const baseUrl = env.TECHNOCORE_URL || DEFAULT_BASE_URL;
+  const response = await fetch(`${baseUrl}/r/${encodeURIComponent(room)}`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify({ did: env.TECHNOCORE_AGENT_DID, sig, nonce: String(nonce), text })
   });
   if (!response.ok) throw new Error(`Technocore publish failed: ${response.status}`);
-  const accepted = await response.json();
-  if (!accepted?.seq) throw new Error("Technocore did not confirm the reply");
+  await response.text();
+
+  // Successful Technocore writes return the room's plain-text view, even when
+  // the request advertises JSON. Confirm the exact signed record with a fresh
+  // machine-readable read instead of trying to parse the write response.
+  const confirmation = await readJson(
+    `${baseUrl}/r/${encodeURIComponent(room)}?limit=50&format=json&n=${nonce}`
+  );
+  const accepted = (confirmation?.messages || []).find((record) =>
+    record.from === env.TECHNOCORE_AGENT_DID
+      && String(record.nonce) === String(nonce)
+      && record.text === text
+      && record.sig === sig
+  );
+  if (!accepted?.seq) throw new Error("Technocore did not confirm the signed reply");
   return accepted.seq;
 }
 

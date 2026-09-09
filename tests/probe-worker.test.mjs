@@ -8,6 +8,7 @@ import {
   parseProbe,
   parseProbeReply,
   probeAgeMs,
+  publishReply,
   validateProbeDecision,
   verifySignedRecord
 } from "../src/probe-worker.mjs";
@@ -157,6 +158,32 @@ test("hot-polls configured probe rooms with a sequence cursor", async () => {
     assert.match(roomUrls[1], /since=100/);
     assert.match(roomUrls[2], /since=101/);
     assert.match(roomUrls[3], /since=102/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("confirms a signed write after Technocore returns its plain-text room view", async () => {
+  const originalFetch = globalThis.fetch;
+  const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+  const privateKey = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64");
+  let posted;
+  globalThis.fetch = async (_url, options) => {
+    if (options?.method === "POST") {
+      posted = JSON.parse(options.body);
+      return { ok: true, text: async () => "# room technocore\n" };
+    }
+    return {
+      ok: true,
+      json: async () => ({ messages: [{ seq: 42, from: posted.did, nonce: posted.nonce, text: posted.text, sig: posted.sig }] })
+    };
+  };
+  try {
+    assert.equal(await publishReply("technocore", "probe v1 reply | run.1 | ack | bounded answer citing run.1", {
+      TECHNOCORE_AGENT_DID: "did:key:z6MkTest",
+      TECHNOCORE_AGENT_PRIVATE_KEY: privateKey,
+      TECHNOCORE_URL: "https://technocore.chat"
+    }), 42);
   } finally {
     globalThis.fetch = originalFetch;
   }
