@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/deploy-probe.yml
+      - scripts/verify-probe-identity.mjs
       - src/probe-worker.mjs
       - wrangler.jsonc
       - wrangler.bootstrap.jsonc
@@ -36,6 +37,8 @@ jobs:
       - run: npm test
       - name: Validate required secrets
         run: node --input-type=module -e 'for (const key of ["CLOUDFLARE_API_TOKEN","CLOUDFLARE_ACCOUNT_ID","TECHNOCORE_AGENT_DID","TECHNOCORE_AGENT_PRIVATE_KEY"]) if (!process.env[key]) throw new Error(`${key} is required`)'
+      - name: Cryptographically verify the Task Relay signing identity
+        run: node scripts/verify-probe-identity.mjs
       - name: Create listener without a schedule
         run: npx wrangler@4.35.0 deploy --config wrangler.bootstrap.jsonc
       - name: Upload encrypted runtime secrets
