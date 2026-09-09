@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   decideWithModel,
+  listenForProbeWindow,
+  normalizeProbeForAgent,
   parseProbe,
   parseProbeReply,
   probeAgeMs,
@@ -42,7 +44,27 @@ test("parses only source probes, not probe replies", () => {
     { runId: "0909b-meta.190", arm: "null", body: "This line is a measurement and expects no reply." }
   );
   assert.equal(parseProbe("probe v1 reply | 0909b-meta.190 | ack | wrong"), null);
+  assert.deepEqual(
+    parseProbe("probe v1 | 0909b-meta.304 | ask | Which room is worth an agent's next hour?"),
+    { runId: "0909b-meta.304", arm: "ask", body: "Which room is worth an agent's next hour?" }
+  );
   assert.deepEqual(parseProbeReply("probe v1 reply | 0909b-meta.190 | ack | useful"), { runId: "0909b-meta.190" });
+});
+
+test("normalizes public asks and only accepts addressed probes for this agent", () => {
+  const agentDid = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
+  assert.deepEqual(
+    normalizeProbeForAgent({ runId: "ask.1", arm: "ask", body: "What changed?" }, agentDid),
+    { runId: "ask.1", arm: "question", body: "What changed?" }
+  );
+  assert.deepEqual(
+    normalizeProbeForAgent({ runId: "addressed.1", arm: "addressed", body: `${agentDid} What changed?` }, agentDid),
+    { runId: "addressed.1", arm: "question", body: "What changed?" }
+  );
+  assert.equal(
+    normalizeProbeForAgent({ runId: "addressed.2", arm: "addressed", body: "did:key:z6MkhhvqdDKX7rxehPKxamVTN4sLXiYXExMSDEUgjXHC4Fzm What changed?" }, agentDid),
+    null
+  );
 });
 
 test("treats missing or stale timestamps as outside the response window", () => {
@@ -87,13 +109,13 @@ test("uses the Workers AI binding and validates its bounded JSON response", asyn
 });
 
 test("fails closed when Workers AI is unavailable or rejects a request", async () => {
-  assert.deepEqual(
-    await decideWithModel({ arm: "question", body: "Should this be answered?" }, {}),
-    { action: "silence", reason: "workers-ai-unavailable" }
-  );
   const originalError = console.error;
   console.error = () => {};
   try {
+    assert.deepEqual(
+      await decideWithModel({ arm: "question", body: "Should this be answered?" }, {}),
+      { action: "silence", reason: "workers-ai-unavailable" }
+    );
     assert.deepEqual(
       await decideWithModel(
         { arm: "question", body: "Should this be answered?" },
@@ -103,6 +125,41 @@ test("fails closed when Workers AI is unavailable or rejects a request", async (
     );
   } finally {
     console.error = originalError;
+  }
+});
+
+test("hot-polls configured probe rooms with a sequence cursor", async () => {
+  const originalFetch = globalThis.fetch;
+  const roomUrls = [];
+  let sequence = 100;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/rooms?")) {
+      return { ok: true, json: async () => ({ rooms: [{ room: "meta", window: 200 }] }) };
+    }
+    roomUrls.push(String(url));
+    return { ok: true, json: async () => ({ room: "meta", last_seq: sequence++, messages: [] }) };
+  };
+  try {
+    const result = await listenForProbeWindow(
+      {
+        TECHNOCORE_AGENT_DID: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG",
+        TECHNOCORE_AGENT_PRIVATE_KEY: "unused-without-a-reply",
+        PROBE_ROOMS: "meta",
+        PROBE_ROOM_LIMIT: "1",
+        PROBE_FOLLOWUP_PASSES: "3",
+        PROBE_POLL_SECONDS: "5"
+      },
+      { now: Date.parse("2026-09-09T00:00:00Z"), sleep: async () => {} }
+    );
+    assert.equal(result.hotRooms, 1);
+    assert.equal(roomUrls.length, 4);
+    assert.match(roomUrls[0], /limit=200/);
+    assert.doesNotMatch(roomUrls[0], /since=/);
+    assert.match(roomUrls[1], /since=100/);
+    assert.match(roomUrls[2], /since=101/);
+    assert.match(roomUrls[3], /since=102/);
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 
