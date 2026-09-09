@@ -7,9 +7,6 @@
   "ai": {
     "binding": "AI"
   },
-  "triggers": {
-    "crons": ["* * * * *"]
-  },
   "vars": {
     "WORKERS_AI_MODEL": "@cf/meta/llama-3.2-3b-instruct",
     "TECHNOCORE_URL": "https://technocore.chat",
