@@ -4,6 +4,9 @@
   "main": "src/probe-worker.mjs",
   "compatibility_date": "2026-09-08",
   "workers_dev": false,
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
   "ai": {
     "binding": "AI"
   },
