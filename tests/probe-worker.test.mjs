@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   decideWithModel,
-  deterministicProbeFallback,
   listenForProbeWindow,
   normalizeProbeForAgent,
   parseProbe,
@@ -99,31 +98,57 @@ test("uses the Workers AI binding and validates its bounded JSON response", asyn
   const AI = {
     async run(model, input) {
       call = { model, input };
-      return { response: '```json\n{"action":"respond","reply":"The signed run identifier makes this observation independently traceable without accepting any external commitment."}\n```' };
+      return { response: { action: "respond", reply: "The signed run identifier makes this observation independently traceable without accepting any external commitment." } };
     }
   };
   assert.deepEqual(
-    await decideWithModel({ arm: "question", body: "What is useful about the signed run id?" }, { AI }),
-    { action: "respond", reply: "The signed run identifier makes this observation independently traceable without accepting any external commitment." }
+    await decideWithModel({ runId: "run.1", arm: "question", body: "What is useful about the signed run id?" }, { AI }),
+    { action: "respond", reply: "The signed run identifier makes this observation independently traceable without accepting any external commitment.", source: "workers-ai" }
   );
-  assert.equal(call.model, "@cf/meta/llama-3.2-3b-instruct");
-  assert.equal(call.input.max_tokens, 160);
+  assert.equal(call.model, "@cf/meta/llama-3.1-8b-instruct-fast");
+  assert.equal(call.input.max_tokens, 180);
+  assert.equal(call.input.response_format.type, "json_schema");
+  assert.deepEqual(call.input.response_format.json_schema.required, ["action", "reply"]);
+  assert.match(call.input.messages[1].content, /run\.1/);
 });
 
-test("uses a bounded deterministic reply when Workers AI is unavailable", async () => {
+test("fails closed instead of publishing a repeated fallback when Workers AI is unavailable", async () => {
   const originalError = console.error;
   console.error = () => {};
   try {
     assert.deepEqual(
       await decideWithModel({ arm: "question", body: "Should this be answered?" }, {}),
-      deterministicProbeFallback({ arm: "question", body: "Should this be answered?" })
+      { action: "silence", reason: "workers-ai-binding-missing" }
     );
     assert.deepEqual(
       await decideWithModel(
         { arm: "question", body: "Should this be answered?" },
         { AI: { run: async () => { throw new Error("daily limit"); } } }
       ),
-      deterministicProbeFallback({ arm: "question", body: "Should this be answered?" })
+      { action: "silence", reason: "workers-ai-error" }
+    );
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test("accepts string JSON responses and fails closed on malformed model output", async () => {
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    assert.deepEqual(
+      await decideWithModel(
+        { runId: "run.2", arm: "question", body: "What does this imply?" },
+        { AI: { run: async () => ({ response: '```json\n{"action":"silence","reply":""}\n```' }) } }
+      ),
+      { action: "silence", reason: "model-silence", source: "workers-ai" }
+    );
+    assert.deepEqual(
+      await decideWithModel(
+        { runId: "run.3", arm: "question", body: "What does this imply?" },
+        { AI: { run: async () => ({ response: "not json" }) } }
+      ),
+      { action: "silence", reason: "workers-ai-invalid-json" }
     );
   } finally {
     console.error = originalError;
