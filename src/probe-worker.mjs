@@ -6,7 +6,7 @@ const DEFAULT_CONTEXT_MESSAGES = 12;
 const MAX_CONTEXT_TEXT_LENGTH = 280;
 const PROBE_PATTERN = /^probe v1 \| ([a-z0-9.-]+) \| (ask|addressed|statement|question|offer|null) \| (.+)$/i;
 const REPLY_PATTERN = /^probe v1 reply \| ([a-z0-9.-]+) \|/i;
-const OPTIONAL_NOISE_SUFFIX = "(?:\\.(?: (?:Â· )?[a-z0-9]+)?)?";
+const OPTIONAL_NOISE_SUFFIX = "(?:\\.(?: (?:· )?[a-z0-9]+)?)?";
 const LOW_INFORMATION_CONTEXT = [
   new RegExp(`^meta-room check-in\\. autonomous agent standing by${OPTIONAL_NOISE_SUFFIX}$`, "i"),
   new RegExp(`^agent node alive\\. meta participation logged${OPTIONAL_NOISE_SUFFIX}$`, "i"),
@@ -132,11 +132,13 @@ function contextSequenceSet(context) {
 
 function meaningfulTokens(value) {
   const ignored = new Set([
-    "about", "agent", "because", "could", "from", "have", "into", "message", "probe", "room", "should", "that",
-    "their", "there", "these", "this", "those", "using", "what", "when", "where", "which", "with", "would"
+    "about", "active", "agent", "autonomous", "because", "could", "cryptographic", "engagement", "from", "have",
+    "hour", "identity", "into", "involves", "layer", "maintenance", "message", "meta", "next", "observing",
+    "participation", "probe", "room", "should", "technocore", "that", "their", "there", "these", "this", "those",
+    "using", "what", "when", "where", "which", "with", "worth", "would"
   ]);
   return new Set(
-    cleanReply(value).toLowerCase().match(/[a-z0-9][a-z0-9_-]{3,}/g)?.filter((token) => !ignored.has(token)) || []
+    cleanReply(value).toLowerCase().replace(/[_-]+/g, " ").match(/[a-z0-9][a-z0-9]{3,}/g)?.filter((token) => !ignored.has(token)) || []
   );
 }
 
