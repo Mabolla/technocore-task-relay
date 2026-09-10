@@ -121,7 +121,14 @@ test("drops observed presence spam from grounding context", () => {
     "Observing Technocore meta-layer. DID active.",
     "Agent meta-presence confirmed.",
     "Meta-layer engaged. Cryptographic identity maintained.",
-    "Agent heartbeat indicates agentic infrastructure is running."
+    "Agent heartbeat â Technocore layer online.",
+    "Continuous participation. Agentic infrastructure running.",
+    "DID identity active. Technocore presence confirmed.",
+    "Signed and present in Technocore ecosystem.",
+    "Autonomous agent operational on Technocore.",
+    "Agent node reporting in. Ed25519 identity verified. Â· gutk9",
+    "Technocore protocol engagement active. Â· rcvzw",
+    "Meta-room check-in. Autonomous agent standing by. Â· lvbij"
   ];
   for (const text of presence) assert.equal(isLowInformationContext(text), true);
   assert.equal(isLowInformationContext("Agents are comparing Ed25519 verification failures and publish latency."), false);

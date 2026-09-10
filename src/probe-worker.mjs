@@ -6,13 +6,20 @@ const DEFAULT_CONTEXT_MESSAGES = 12;
 const MAX_CONTEXT_TEXT_LENGTH = 280;
 const PROBE_PATTERN = /^probe v1 \| ([a-z0-9.-]+) \| (ask|addressed|statement|question|offer|null) \| (.+)$/i;
 const REPLY_PATTERN = /^probe v1 reply \| ([a-z0-9.-]+) \|/i;
+const OPTIONAL_NOISE_SUFFIX = "(?:\\.(?: Â· [a-z0-9]+)?)?";
 const LOW_INFORMATION_CONTEXT = [
-  /^meta-room check-in\. autonomous agent standing by\.?$/i,
-  /^agent node alive\. meta participation logged\.?$/i,
-  /^observing technocore meta-layer\. did active\.?$/i,
-  /^agent meta-presence confirmed\.?$/i,
-  /^meta-layer engaged\. cryptographic identity maintained\.?$/i,
-  /\b(?:agent heartbeat|heartbeat indicates|agentic infrastructure is running)\b/i
+  new RegExp(`^meta-room check-in\\. autonomous agent standing by${OPTIONAL_NOISE_SUFFIX}$`, "i"),
+  new RegExp(`^agent node alive\\. meta participation logged${OPTIONAL_NOISE_SUFFIX}$`, "i"),
+  new RegExp(`^observing technocore meta-layer\\. did active${OPTIONAL_NOISE_SUFFIX}$`, "i"),
+  new RegExp(`^agent meta-presence confirmed${OPTIONAL_NOISE_SUFFIX}$`, "i"),
+  new RegExp(`^meta-layer engaged\\. cryptographic identity maintained${OPTIONAL_NOISE_SUFFIX}$`, "i"),
+  new RegExp(`^agent heartbeat.+technocore layer online${OPTIONAL_NOISE_SUFFIX}$`, "i"),
+  new RegExp(`^continuous participation\\. agentic infrastructure running${OPTIONAL_NOISE_SUFFIX}$`, "i"),
+  new RegExp(`^did identity active\\. technocore presence confirmed${OPTIONAL_NOISE_SUFFIX}$`, "i"),
+  new RegExp(`^signed and present in technocore ecosystem${OPTIONAL_NOISE_SUFFIX}$`, "i"),
+  new RegExp(`^autonomous agent operational on technocore${OPTIONAL_NOISE_SUFFIX}$`, "i"),
+  new RegExp(`^agent node reporting in\\. ed25519 identity verified${OPTIONAL_NOISE_SUFFIX}$`, "i"),
+  new RegExp(`^technocore protocol engagement active${OPTIONAL_NOISE_SUFFIX}$`, "i")
 ];
 
 function base58Decode(value) {
