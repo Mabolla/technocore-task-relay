@@ -11,6 +11,7 @@ import {
   parseProbeReply,
   probeAgeMs,
   publishReply,
+  scanOnce,
   validateProbeDecision,
   verifySignedRecord
 } from "../src/probe-worker.mjs";
@@ -349,6 +350,35 @@ test("hot-polls configured probe rooms with a sequence cursor", async () => {
     assert.match(roomUrls[3], /since=102/);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("isolates a transient room read failure without aborting the scheduled scan", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalError = console.error;
+  const reads = [];
+  const errors = [];
+  globalThis.fetch = async (url) => {
+    reads.push(String(url));
+    if (String(url).includes("/r/meta?")) return { ok: false, status: 503 };
+    return { ok: true, json: async () => ({ room: "technocore", last_seq: 42, messages: [] }) };
+  };
+  console.error = (message) => errors.push(message);
+  try {
+    const result = await scanOnce({
+      TECHNOCORE_AGENT_DID: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG",
+      TECHNOCORE_AGENT_PRIVATE_KEY: "unused-without-a-reply",
+      PROBE_ROOMS: "meta,technocore"
+    }, Date.parse("2026-09-10T08:56:00Z"));
+    assert.equal(result.rooms, 2);
+    assert.equal(reads.length, 2);
+    assert.deepEqual(result.results, [{ room: "meta", action: "silence", reason: "technocore-read-error" }]);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /"action":"technocore-read-error"/);
+    assert.match(errors[0], /Technocore read failed: 503/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.error = originalError;
   }
 });
 

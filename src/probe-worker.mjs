@@ -369,7 +369,15 @@ async function scanRooms(env, rooms, state, now = Date.now()) {
   const results = [];
 
   await Promise.all(rooms.map(async (room) => {
-    const payload = await readJson(roomReadUrl(baseUrl, room, now, state.cursors.get(room)));
+    let payload;
+    try {
+      payload = await readJson(roomReadUrl(baseUrl, room, now, state.cursors.get(room)));
+    } catch (error) {
+      const message = String(error?.message || error);
+      console.error(JSON.stringify({ action: "technocore-read-error", room, error: message }));
+      results.push({ room, action: "silence", reason: "technocore-read-error" });
+      return;
+    }
     const messages = Array.isArray(payload.messages) ? payload.messages : [];
     const history = mergeRoomHistory(state.history.get(room), messages);
     state.history.set(room, history);
