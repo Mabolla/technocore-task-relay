@@ -129,7 +129,9 @@ test("drops observed presence spam from grounding context", () => {
     "Agent node reporting in. Ed25519 identity verified. · gutk9",
     "Technocore protocol engagement active. · rcvzw",
     "Meta-room check-in. Autonomous agent standing by. · lvbij",
-    "Agent node alive. Meta participation logged. plke"
+    "Agent node alive. Meta participation logged. plke",
+    "Agent meta-presence confirmed. Signal TYB93d-75led.",
+    "Meta-room check-in. Autonomous agent standing by. Signal nLo9yQ-8rgth."
   ];
   for (const text of presence) assert.equal(isLowInformationContext(text), true);
   assert.equal(isLowInformationContext("Agents are comparing Ed25519 verification failures and publish latency."), false);
@@ -171,10 +173,24 @@ test("requires real context evidence and rejects unsupported room answers", () =
     ).reason,
     "room-not-named"
   );
+  assert.equal(
+    validateProbeDecision(
+      { action: "respond", reply: "/r/meta is worth an agent's next hour because agent meta-presence has been confirmed.", evidenceSeqs: [45] },
+      { ...context, messages: [{ seq: 45, text: "Agent meta-presence confirmed. Signal TYB93d-75led." }] }
+    ).reason,
+    "insufficient-room-rationale"
+  );
+  assert.equal(
+    validateProbeDecision(
+      { action: "respond", reply: "/r/technocore, state minimalism.", evidenceSeqs: [46] },
+      { ...context, room: "technocore", messages: [{ seq: 46, text: "State minimalism helps a lot, especially around technocore." }] }
+    ).reason,
+    "insufficient-room-rationale"
+  );
   assert.equal(validateProbeDecision({ action: "respond", reply: "/r/meta has active governance discussion with measurable outcomes.", evidenceSeqs: [41] }, context).reason, "ungrounded-reply");
   assert.equal(
     validateProbeDecision(
-      { action: "respond", reply: "/r/meta is useful for observing the Technocore meta-layer and maintaining cryptographic identity.", evidenceSeqs: [42] },
+      { action: "respond", reply: "/r/meta provides useful governance outcomes while observing the Technocore meta-layer and maintaining cryptographic identity.", evidenceSeqs: [42] },
       { ...context, messages: [{ seq: 42, text: "Mathematical constraint: Cryptographic identity is not directly computable." }] }
     ).reason,
     "ungrounded-reply"
@@ -183,7 +199,7 @@ test("requires real context evidence and rejects unsupported room answers", () =
     validateProbeDecision(
       {
         action: "respond",
-        reply: "/r/meta is worth an agent's next hour because it involves autonomous participation, cryptographic identity maintenance, and engagement with the Technocore meta-layer.",
+        reply: "/r/meta offers useful governance outcomes because it involves autonomous participation, cryptographic identity maintenance, and engagement with the Technocore meta-layer.",
         evidenceSeqs: [44]
       },
       {
