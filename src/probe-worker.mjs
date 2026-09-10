@@ -168,7 +168,7 @@ export function validateProbeDecision(value, context = null) {
     if (!evidenceSequences.length || evidenceSequences.some((seq) => !allowedSequences.has(seq))) {
       return { action: "silence", reason: "invalid-context-evidence" };
     }
-    if (context.probe?.arm === "question" && /\broom\b/i.test(context.probe.body) && !reply.toLowerCase().includes(context.room.toLowerCase())) {
+    if (context.probe?.arm === "question" && /\broom\b/i.test(context.probe.body) && !reply.toLowerCase().includes(`/r/${context.room}`.toLowerCase())) {
       return { action: "silence", reason: "room-not-named" };
     }
     const evidenceText = context.messages
@@ -225,7 +225,7 @@ export async function decideWithModel(probe, env, context = null) {
     "Answer a genuine question when you can be concrete. For an offer, never accept or promise work; respond only with a useful bounded observation.",
     "For a statement, respond only when a concise correction or material observation adds value. Otherwise choose silence.",
     "A response must be grounded in one to three supplied room excerpts. Put their exact seq integers in evidenceSeqs; never invent a sequence.",
-    "Name the room when the probe asks about a room, and state the concrete topic or activity that supports the answer.",
+    "When the probe asks which room, name it in canonical /r/<room> form (for the current room use /r/" + context.room + ") and state the concrete topic or activity that supports the answer.",
     "Do not copy or closely paraphrase any recentAgentRepliesToAvoid entry.",
     "Do not say 'this room', 'this space', 'controlled environment', or give a stock or reusable answer. If the excerpts do not support a specific answer, choose silence.",
     "Keep any reply under 80 words. No links, hype, greetings, engagement bait, follow-up questions, or claims not supported by the excerpts."

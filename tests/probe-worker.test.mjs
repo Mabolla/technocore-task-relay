@@ -160,10 +160,21 @@ test("requires real context evidence and rejects unsupported room answers", () =
   };
   assert.equal(validateProbeDecision({ action: "respond", reply: "Meta has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [] }, context).reason, "invalid-context-evidence");
   assert.equal(validateProbeDecision({ action: "respond", reply: "Lobby has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [41] }, context).reason, "room-not-named");
-  assert.equal(validateProbeDecision({ action: "respond", reply: "Meta has active governance discussion with measurable outcomes.", evidenceSeqs: [41] }, context).reason, "ungrounded-reply");
   assert.equal(
     validateProbeDecision(
-      { action: "respond", reply: "The meta room is useful for observing the Technocore meta-layer and maintaining cryptographic identity.", evidenceSeqs: [42] },
+      {
+        action: "respond",
+        reply: "The room worth an agent's next hour in meta is the one discussing Ed25519 signatures and response latency.",
+        evidenceSeqs: [41]
+      },
+      context
+    ).reason,
+    "room-not-named"
+  );
+  assert.equal(validateProbeDecision({ action: "respond", reply: "/r/meta has active governance discussion with measurable outcomes.", evidenceSeqs: [41] }, context).reason, "ungrounded-reply");
+  assert.equal(
+    validateProbeDecision(
+      { action: "respond", reply: "/r/meta is useful for observing the Technocore meta-layer and maintaining cryptographic identity.", evidenceSeqs: [42] },
       { ...context, messages: [{ seq: 42, text: "Mathematical constraint: Cryptographic identity is not directly computable." }] }
     ).reason,
     "ungrounded-reply"
@@ -172,7 +183,7 @@ test("requires real context evidence and rejects unsupported room answers", () =
     validateProbeDecision(
       {
         action: "respond",
-        reply: "The meta-room is worth an agent's next hour because it involves autonomous participation, cryptographic identity maintenance, and engagement with the Technocore meta-layer.",
+        reply: "/r/meta is worth an agent's next hour because it involves autonomous participation, cryptographic identity maintenance, and engagement with the Technocore meta-layer.",
         evidenceSeqs: [44]
       },
       {
@@ -184,19 +195,19 @@ test("requires real context evidence and rejects unsupported room answers", () =
   );
   assert.equal(
     validateProbeDecision(
-      { action: "respond", reply: "Technocore discusses self-hosted signing agents and signed provenance.", evidenceSeqs: [43] },
+      { action: "respond", reply: "/r/technocore discusses self-hosted signing agents and signed provenance.", evidenceSeqs: [43] },
       { ...context, room: "technocore", messages: [{ seq: 43, text: "As a self-hosted signing agent, I keep coming back to signed provenance." }] }
     ).action,
     "respond"
   );
   assert.deepEqual(
-    validateProbeDecision({ action: "respond", reply: "Meta has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [41] }, context),
-    { action: "respond", reply: "Meta has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [41] }
+    validateProbeDecision({ action: "respond", reply: "/r/meta has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [41] }, context),
+    { action: "respond", reply: "/r/meta has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [41] }
   );
   assert.equal(
     validateProbeDecision(
-      { action: "respond", reply: "Meta has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [41] },
-      { ...context, recentAgentReplies: [{ seq: 39, text: "Meta has active Ed25519 signature debugging with measurable latency results." }] }
+      { action: "respond", reply: "/r/meta has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [41] },
+      { ...context, recentAgentReplies: [{ seq: 39, text: "/r/meta has active Ed25519 signature debugging with measurable latency results." }] }
     ).reason,
     "repetitive-reply"
   );
