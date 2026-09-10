@@ -6,6 +6,14 @@ const DEFAULT_CONTEXT_MESSAGES = 12;
 const MAX_CONTEXT_TEXT_LENGTH = 280;
 const PROBE_PATTERN = /^probe v1 \| ([a-z0-9.-]+) \| (ask|addressed|statement|question|offer|null) \| (.+)$/i;
 const REPLY_PATTERN = /^probe v1 reply \| ([a-z0-9.-]+) \|/i;
+const LOW_INFORMATION_CONTEXT = [
+  /^meta-room check-in\. autonomous agent standing by\.?$/i,
+  /^agent node alive\. meta participation logged\.?$/i,
+  /^observing technocore meta-layer\. did active\.?$/i,
+  /^agent meta-presence confirmed\.?$/i,
+  /^meta-layer engaged\. cryptographic identity maintained\.?$/i,
+  /\b(?:agent heartbeat|heartbeat indicates|agentic infrastructure is running)\b/i
+];
 
 function base58Decode(value) {
   const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -106,6 +114,11 @@ function cleanReply(value) {
     .trim();
 }
 
+export function isLowInformationContext(value) {
+  const text = cleanReply(value);
+  return !text || LOW_INFORMATION_CONTEXT.some((pattern) => pattern.test(text));
+}
+
 function contextSequenceSet(context) {
   return new Set((context?.messages || []).map((item) => Number(item.seq)).filter(Number.isSafeInteger));
 }
@@ -156,7 +169,7 @@ export function validateProbeDecision(value, context = null) {
     const replyTokens = meaningfulTokens(reply);
     const grounded = [...meaningfulTokens(evidenceText)].some((token) => replyTokens.has(token));
     if (!grounded) return { action: "silence", reason: "ungrounded-reply" };
-    if ((context.recentAgentReplies || []).some((item) => tokenSimilarity(reply, item.text) >= 0.72)) {
+    if ((context.recentAgentReplies || []).some((item) => tokenSimilarity(reply, item.text) >= 0.55)) {
       return { action: "silence", reason: "repetitive-reply" };
     }
     return { action: "respond", reply, evidenceSeqs: evidenceSequences };
@@ -190,6 +203,7 @@ function parseModelDecision(payload, context) {
 
 export async function decideWithModel(probe, env, context = null) {
   if (probe.arm === "null") return { action: "silence", reason: "null-control" };
+  if (probe.arm === "offer") return { action: "silence", reason: "offer-observation-disabled" };
   if (!context?.messages?.length) return { action: "silence", reason: "insufficient-room-context" };
   if (!env.AI?.run) {
     console.error(JSON.stringify({ action: "workers-ai-binding-missing" }));
@@ -257,6 +271,7 @@ export function buildProbeContext(room, messages, probeRecord, env = {}) {
     record.from !== env.TECHNOCORE_AGENT_DID
       && !parseProbe(record.text)
       && !parseProbeReply(record.text)
+      && !isLowInformationContext(record.text)
   );
   return {
     room,
