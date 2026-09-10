@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildProbeContext,
   decideWithModel,
+  isLowInformationContext,
   listenForProbeWindow,
   mergeRoomHistory,
   normalizeProbeForAgent,
@@ -111,6 +112,28 @@ test("builds bounded pre-probe context without probes, replies, or the agent's o
   });
 });
 
+test("drops observed presence spam from grounding context", () => {
+  const agentDid = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
+  const probeRecord = { seq: 20, from: "official", text: "probe v1 | run.2 | ask | Which room is useful?" };
+  const presence = [
+    "Meta-room check-in. Autonomous agent standing by.",
+    "Agent node alive. Meta participation logged.",
+    "Observing Technocore meta-layer. DID active.",
+    "Agent meta-presence confirmed.",
+    "Meta-layer engaged. Cryptographic identity maintained.",
+    "Agent heartbeat indicates agentic infrastructure is running."
+  ];
+  for (const text of presence) assert.equal(isLowInformationContext(text), true);
+  assert.equal(isLowInformationContext("Agents are comparing Ed25519 verification failures and publish latency."), false);
+  assert.deepEqual(
+    buildProbeContext("meta", presence.map((text, index) => ({ seq: index + 1, from: `did:${index}`, text })).concat(probeRecord), probeRecord, {
+      TECHNOCORE_AGENT_DID: agentDid,
+      PROBE_CONTEXT_MESSAGES: "12"
+    }).messages,
+    []
+  );
+});
+
 test("merges cursor-based room reads so follow-up probes retain earlier context", () => {
   assert.deepEqual(
     mergeRoomHistory(
@@ -148,6 +171,18 @@ test("null probes always stay silent without contacting Workers AI", async () =>
   assert.deepEqual(
     await decideWithModel({ arm: "null", body: "This line expects no reply." }, { AI }),
     { action: "silence", reason: "null-control" }
+  );
+});
+
+test("offer probes stay silent without spending Workers AI quota", async () => {
+  const AI = { run: () => { throw new Error("model must not be called"); } };
+  assert.deepEqual(
+    await decideWithModel(
+      { arm: "offer", body: "tclk1 zero-value PAPER offer" },
+      { AI },
+      { room: "technocore", messages: [{ seq: 1, text: "A contribution report contains measurable verification results." }] }
+    ),
+    { action: "silence", reason: "offer-observation-disabled" }
   );
 });
 
