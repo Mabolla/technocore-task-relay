@@ -6,7 +6,7 @@ const DEFAULT_CONTEXT_MESSAGES = 12;
 const MAX_CONTEXT_TEXT_LENGTH = 280;
 const PROBE_PATTERN = /^probe v1 \| ([a-z0-9.-]+) \| (ask|addressed|statement|question|offer|null) \| (.+)$/i;
 const REPLY_PATTERN = /^probe v1 reply \| ([a-z0-9.-]+) \|/i;
-const OPTIONAL_NOISE_SUFFIX = "(?:\\.(?: Â· [a-z0-9]+)?)?";
+const OPTIONAL_NOISE_SUFFIX = "(?:\\.(?: (?:Â· )?[a-z0-9]+)?)?";
 const LOW_INFORMATION_CONTEXT = [
   new RegExp(`^meta-room check-in\\. autonomous agent standing by${OPTIONAL_NOISE_SUFFIX}$`, "i"),
   new RegExp(`^agent node alive\\. meta participation logged${OPTIONAL_NOISE_SUFFIX}$`, "i"),
@@ -173,9 +173,9 @@ export function validateProbeDecision(value, context = null) {
       .filter((item) => evidenceSequences.includes(Number(item.seq)))
       .map((item) => item.text)
       .join(" ");
-    const replyTokens = meaningfulTokens(reply);
-    const grounded = [...meaningfulTokens(evidenceText)].some((token) => replyTokens.has(token));
-    if (!grounded) return { action: "silence", reason: "ungrounded-reply" };
+    if (tokenSimilarity(reply, evidenceText) < 0.25) {
+      return { action: "silence", reason: "ungrounded-reply" };
+    }
     if ((context.recentAgentReplies || []).some((item) => tokenSimilarity(reply, item.text) >= 0.55)) {
       return { action: "silence", reason: "repetitive-reply" };
     }
