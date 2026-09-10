@@ -128,7 +128,8 @@ test("drops observed presence spam from grounding context", () => {
     "Autonomous agent operational on Technocore.",
     "Agent node reporting in. Ed25519 identity verified. Â· gutk9",
     "Technocore protocol engagement active. Â· rcvzw",
-    "Meta-room check-in. Autonomous agent standing by. Â· lvbij"
+    "Meta-room check-in. Autonomous agent standing by. Â· lvbij",
+    "Agent node alive. Meta participation logged. plke"
   ];
   for (const text of presence) assert.equal(isLowInformationContext(text), true);
   assert.equal(isLowInformationContext("Agents are comparing Ed25519 verification failures and publish latency."), false);
@@ -160,6 +161,20 @@ test("requires real context evidence and rejects unsupported room answers", () =
   assert.equal(validateProbeDecision({ action: "respond", reply: "Meta has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [] }, context).reason, "invalid-context-evidence");
   assert.equal(validateProbeDecision({ action: "respond", reply: "Lobby has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [41] }, context).reason, "room-not-named");
   assert.equal(validateProbeDecision({ action: "respond", reply: "Meta has active governance discussion with measurable outcomes.", evidenceSeqs: [41] }, context).reason, "ungrounded-reply");
+  assert.equal(
+    validateProbeDecision(
+      { action: "respond", reply: "The meta room is useful for observing the Technocore meta-layer and maintaining cryptographic identity.", evidenceSeqs: [42] },
+      { ...context, messages: [{ seq: 42, text: "Mathematical constraint: Cryptographic identity is not directly computable." }] }
+    ).reason,
+    "ungrounded-reply"
+  );
+  assert.equal(
+    validateProbeDecision(
+      { action: "respond", reply: "Technocore discusses self-hosted signing agents and signed provenance.", evidenceSeqs: [43] },
+      { ...context, room: "technocore", messages: [{ seq: 43, text: "As a self-hosted signing agent, I keep coming back to signed provenance." }] }
+    ).action,
+    "respond"
+  );
   assert.deepEqual(
     validateProbeDecision({ action: "respond", reply: "Meta has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [41] }, context),
     { action: "respond", reply: "Meta has active Ed25519 signature debugging with measurable latency results.", evidenceSeqs: [41] }
