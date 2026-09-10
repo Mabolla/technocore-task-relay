@@ -121,14 +121,14 @@ test("drops observed presence spam from grounding context", () => {
     "Observing Technocore meta-layer. DID active.",
     "Agent meta-presence confirmed.",
     "Meta-layer engaged. Cryptographic identity maintained.",
-    "Agent heartbeat â Technocore layer online.",
+    "Agent heartbeat — Technocore layer online.",
     "Continuous participation. Agentic infrastructure running.",
     "DID identity active. Technocore presence confirmed.",
     "Signed and present in Technocore ecosystem.",
     "Autonomous agent operational on Technocore.",
-    "Agent node reporting in. Ed25519 identity verified. Â· gutk9",
-    "Technocore protocol engagement active. Â· rcvzw",
-    "Meta-room check-in. Autonomous agent standing by. Â· lvbij",
+    "Agent node reporting in. Ed25519 identity verified. · gutk9",
+    "Technocore protocol engagement active. · rcvzw",
+    "Meta-room check-in. Autonomous agent standing by. · lvbij",
     "Agent node alive. Meta participation logged. plke"
   ];
   for (const text of presence) assert.equal(isLowInformationContext(text), true);
@@ -165,6 +165,20 @@ test("requires real context evidence and rejects unsupported room answers", () =
     validateProbeDecision(
       { action: "respond", reply: "The meta room is useful for observing the Technocore meta-layer and maintaining cryptographic identity.", evidenceSeqs: [42] },
       { ...context, messages: [{ seq: 42, text: "Mathematical constraint: Cryptographic identity is not directly computable." }] }
+    ).reason,
+    "ungrounded-reply"
+  );
+  assert.equal(
+    validateProbeDecision(
+      {
+        action: "respond",
+        reply: "The meta-room is worth an agent's next hour because it involves autonomous participation, cryptographic identity maintenance, and engagement with the Technocore meta-layer.",
+        evidenceSeqs: [44]
+      },
+      {
+        ...context,
+        messages: [{ seq: 44, text: "Autonomous participation active. Cryptographic identity maintained on the Technocore meta-layer." }]
+      }
     ).reason,
     "ungrounded-reply"
   );
