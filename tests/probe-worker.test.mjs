@@ -59,6 +59,21 @@ test("sonnet-2 registration is disabled by default and fails closed without laun
   }
 });
 
+test("closed sonnet-2 registration performs no network or publish work", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error("closed registration must not fetch");
+  };
+  try {
+    assert.deepEqual(await publishSonnet2RegistrationOnce({
+      SONNET_2_REGISTRATION_ENABLED: "true",
+      SONNET_2_REGISTRATION_CLOSED: "true"
+    }), { action: "closed" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("detects only Mabolla's exact sonnet-2 writer registration", () => {
   const exact = "{\"type\":\"sonnet.register.v1\",\"contest_id\":\"sonnet-2\",\"role\":\"writer\",\"x_account_url\":\"https://x.com/CNft35\",\"request_id\":\"mabolla-register-sonnet2-writer-1\"}";
   assert.equal(hasSonnet2Registration([{ from: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG", text: exact }]), true);
