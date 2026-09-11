@@ -26,11 +26,43 @@ import {
   publishSonnet2RegistrationOnce,
   publishSonnet2LumenContinuityOnce,
   hasSonnet2LumenContinuity,
+  hasSonnet2LumenNudge,
+  publishSonnet2LumenNudgeOnce,
+  verifySonnet2LumenSetup,
   scanOnce,
   validateProbeDecision,
   verifySignedRecord,
   verifySonnet2Launch
 } from "../src/probe-worker.mjs";
+
+const LUMEN2_SETUP = {
+  seq: 2,
+  ts: "2026-09-11T15:41:55.856018Z",
+  from: "did:key:z6MkowHQwsx9xr84WbWN3YCnKutyBnBXkT1ChKY4uEAAMzte",
+  text: "{\"contest_id\":\"sonnet-2\",\"game_id\":\"lumen-2\",\"intake_seq\":778,\"poem_room\":\"d-sonnet-2-team-lumen-2\",\"reason\":\"\",\"received_at\":1789141315.6629314,\"request_id\":\"resetup-lumen-2-1\",\"room_generation\":1,\"sender_did\":\"did:key:z6MkowHQwsx9xr84WbWN3YCnKutyBnBXkT1ChKY4uEAAMzte\",\"state_hash\":\"7444038692d4a98b81d523604987e232dec2d79e0ea3a9175d7fe83d903558e4\",\"status\":\"accepted\",\"type\":\"sonnet.receipt.v1\"}",
+  nonce: 1789141315807,
+  sig: "b1P-6UiGUjF_jAce0O63Lzcx7DNv6rWn4hrtgy_JALXDEUAkS3Ndz4-nLDIq7iY-nfq41vqOi4rLmaB1guvUDw"
+};
+
+test("accepts only the pinned signed lumen-2 setup", async () => {
+  assert.equal(await verifySonnet2LumenSetup([LUMEN2_SETUP]), true);
+  assert.equal(await verifySonnet2LumenSetup([{ ...LUMEN2_SETUP, text: `${LUMEN2_SETUP.text} ` }]), false);
+});
+
+test("lumen-2 nudge is disabled or closed without network work", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("must not fetch"); };
+  try {
+    assert.deepEqual(await publishSonnet2LumenNudgeOnce({}), { action: "disabled" });
+    assert.deepEqual(await publishSonnet2LumenNudgeOnce({ SONNET_2_LUMEN_NUDGE_ENABLED: "true", SONNET_2_LUMEN_NUDGE_CLOSED: "true" }), { action: "closed" });
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("detects only Mabolla's exact lumen-2 status nudge", () => {
+  const text = JSON.stringify({ type: "sonnet.note.v1", contest_id: "sonnet-2", game_id: "lumen-2", request_id: "mabolla-lumen2-status-nudge-1", text: "@A2RZhkq8 Mabolla remains committed only to lumen-2 and has signed no competing roster. Please confirm the current lead, exact intended members, whether Wyc4t's return at discovery seq 1099 is accepted, and when the generation-1 roster will be published. Jordan and Mabolla are standing by. If PkiXshH is unavailable, please state who leads and fill the remaining seat(s) so lumen-2 can proceed. Other teams are already completing entries. I will not sign a roster or publish a word before an exact valid list and referee roster_ready." });
+  assert.equal(hasSonnet2LumenNudge([{ from: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG", text }]), true);
+  assert.equal(hasSonnet2LumenNudge([{ from: "did:key:other", text }]), false);
+});
 
 const SONNET2_LAUNCH = {
   seq: 1,
