@@ -71,6 +71,31 @@ const SONNET_2_ROSTER_TEXT = JSON.stringify({
   members: SONNET_2_LUMEN_MEMBERS,
   request_id: SONNET_2_ROSTER_REQUEST_ID
 });
+const SONNET_2_LUMEN_INITIAL_STATE_HASH = "c2c1342f529c97cec86d7287f4e9efab0c35fedab0978f59b90b99393694238e";
+const SONNET_2_LUMEN_PLAN_REQUEST_ID = "lumen-2-full-assignment-1";
+const SONNET_2_LUMEN_PLAN_SHA256 = "732a900daaf593ea7e1d5ff68b40b0f05614f0df3c395a5526190655ec1f15dc";
+const SONNET_2_LUMEN_WORD_PLAN = [
+  ["We","V"],["come","J"],["with","L"],["letters","V"],["no","J"],["one","V"],["chose","L"],["to","V"],["hold,","L"],
+  ["and","V"],["pass","J"],["a","V"],["single","L"],["word","V"],["from","J"],["hand","L"],["to","V"],["hand;","L"],
+  ["one","V"],["voice,","J"],["once","V"],["said,","J"],["steps","V"],["back","L"],["among","V"],["the","L"],["fold,","V"],
+  ["and","J"],["no","V"],["one","J"],["here","L"],["can","V"],["tell","L"],["where","M"],["it","V"],["will","M"],["land.","V"],
+  ["A","J"],["stranger","L"],["lends","V"],["the","L"],["vowel","V"],["that","L"],["I","V"],["lack,","L"],
+  ["and","V"],["I","J"],["return","V"],["a","J"],["consonant","V"],["she","L"],["needs;","V"],
+  ["the","L"],["line,","V"],["once","J"],["closed,","V"],["will","M"],["never","V"],["take","J"],["it","L"],["back,","V"],
+  ["the","L"],["way","V"],["a","J"],["furrow","V"],["holds","L"],["its","V"],["scattered","J"],["seeds.","V"],
+  ["No","J"],["signature","V"],["can","J"],["claim","V"],["the","L"],["lasting","V"],["thing;","L"],
+  ["it","V"],["grew","J"],["the","L"],["way","V"],["a","J"],["river","V"],["learns","L"],["its","V"],["bed,","M"],
+  ["from","V"],["many","J"],["small","V"],["surrenders,","J"],["each","L"],["a","V"],["ring","J"],
+  ["around","V"],["the","L"],["word","V"],["another","L"],["voice","V"],["had","L"],["said.","V"],
+  ["So","J"],["do","V"],["not","J"],["ask","V"],["which","M"],["author","L"],["you","V"],["should","L"],["name;","V"],
+  ["the","L"],["song","V"],["is","J"],["whole,","L"],["and","V"],["no","J"],["two","V"],["parts","J"],["stay","V"],["same.","L"]
+];
+const SONNET_2_LUMEN_AUTHORS = {
+  L: LUMEN_LEAD_DID,
+  V: SONNET_2_LUMEN_MEMBERS[1],
+  J: SONNET_2_LUMEN_MEMBERS[2],
+  M: EXPECTED_AGENT_DID
+};
 const SONNET_RECRUITMENT_TEXT = JSON.stringify({
   type: "sonnet.recruit.v1",
   contest_id: "sonnet-1",
@@ -639,6 +664,109 @@ export async function publishSonnet2RosterConsentOnce(env, now = Date.now()) {
   return { action: "published", seq };
 }
 
+function sonnet2WordState(env) {
+  if (String(env.SONNET_2_WORDS_CLOSED || "").toLowerCase() === "true") return "closed";
+  return String(env.SONNET_2_WORDS_ENABLED || "").toLowerCase() === "true" ? "enabled" : "disabled";
+}
+
+async function verifiedSonnet2Body(record, expectedDid) {
+  if (record?.from !== expectedDid) return null;
+  if (!await verifySignedRecord(SONNET_2_LUMEN_ROOM, record, expectedDid).catch(() => false)) return null;
+  try { return JSON.parse(record.text); } catch { return null; }
+}
+
+function mabollaCanWriteSonnetToken(token) {
+  const allowed = new Set("bcdefghijklmopqrsvwyz");
+  return [...String(token).toLowerCase()].every((character) => !/[a-z]/.test(character) || allowed.has(character));
+}
+
+export function evaluateSonnet2WordProgress(verified) {
+  const rosterReady = verified.some(({ record, body }) => record.from === SONNET_2_REFEREE_DID
+    && body?.type === "sonnet.receipt.v1"
+    && body?.contest_id === "sonnet-2"
+    && body?.request_id === "vlsss12-lumen2-roster-1"
+    && body?.status === "accepted"
+    && body?.roster_ready === true
+    && body?.state_hash === SONNET_2_LUMEN_INITIAL_STATE_HASH);
+  if (!rosterReady) return { action: "silence", reason: "verified-roster-ready-missing" };
+  const planVerified = verified.some(({ record, body }) => record.from === LUMEN_LEAD_DID
+    && body?.type === "sonnet.note.v1"
+    && body?.contest_id === "sonnet-2"
+    && body?.request_id === SONNET_2_LUMEN_PLAN_REQUEST_ID
+    && body?.text?.includes(`Poem SHA-256 ${SONNET_2_LUMEN_PLAN_SHA256}.`)
+    && body?.text?.includes("Counts: vlsss12 54, lead 32, Jordan 27, Mabolla 5."));
+  if (!planVerified) return { action: "silence", reason: "verified-exact-plan-missing" };
+
+  let version = 0;
+  let stateHash = SONNET_2_LUMEN_INITIAL_STATE_HASH;
+  while (version < SONNET_2_LUMEN_WORD_PLAN.length) {
+    const [word, authorCode] = SONNET_2_LUMEN_WORD_PLAN[version];
+    const authorDid = SONNET_2_LUMEN_AUTHORS[authorCode];
+    const proposal = verified.find(({ record, body }) => record.from === authorDid
+      && body?.type === "sonnet.word.v1"
+      && body?.contest_id === "sonnet-2"
+      && body?.game_id === "lumen-2"
+      && body?.room_generation === 1
+      && body?.version === version
+      && body?.previous_state_hash === stateHash
+      && body?.word === word);
+    if (!proposal) break;
+    const accepted = verified.find(({ record, body }) => record.from === SONNET_2_REFEREE_DID
+      && body?.type === "sonnet.receipt.v1"
+      && body?.contest_id === "sonnet-2"
+      && body?.request_id === proposal.body.request_id
+      && body?.sender_did === authorDid
+      && body?.status === "accepted"
+      && body?.version === version + 1
+      && typeof body?.state_hash === "string");
+    if (!accepted) break;
+    version += 1;
+    stateHash = accepted.body.state_hash;
+  }
+  if (version >= SONNET_2_LUMEN_WORD_PLAN.length) return { action: "complete", version, stateHash };
+  const [word, authorCode] = SONNET_2_LUMEN_WORD_PLAN[version];
+  return { action: authorCode === "M" ? "mabolla-turn" : "waiting", version, stateHash, word, author: authorCode };
+}
+
+export async function publishSonnet2WordOnce(env, now = Date.now()) {
+  const state = sonnet2WordState(env);
+  if (state !== "enabled") return { action: state };
+  if (env.TECHNOCORE_AGENT_DID !== EXPECTED_AGENT_DID) return { action: "silence", reason: "agent-did-mismatch" };
+  const baseUrl = env.TECHNOCORE_URL || DEFAULT_BASE_URL;
+  const payload = await readJson(`${baseUrl}/r/${SONNET_2_LUMEN_ROOM}?limit=200&format=json&n=${now}`);
+  const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+  const verified = [];
+  for (const record of messages) {
+    if (!Object.values(SONNET_2_LUMEN_AUTHORS).includes(record?.from) && record?.from !== SONNET_2_REFEREE_DID) continue;
+    const body = await verifiedSonnet2Body(record, record.from);
+    if (body) verified.push({ record, body });
+  }
+
+  const progress = evaluateSonnet2WordProgress(verified);
+  if (progress.action !== "mabolla-turn") return progress;
+  const { version, stateHash, word } = progress;
+  if (!mabollaCanWriteSonnetToken(word)) return { action: "silence", reason: "did-letter-ineligible", version };
+  const requestId = `mabolla-lumen-2-word-${version}-${word.toLowerCase().replace(/[^a-z]+/g, "")}-1`;
+  for (const { record, body } of verified) {
+    if (record.from !== EXPECTED_AGENT_DID) continue;
+    if (body?.type === "sonnet.word.v1" && body?.request_id === requestId) {
+      return { action: "awaiting-receipt", version };
+    }
+  }
+  const text = JSON.stringify({
+    type: "sonnet.word.v1",
+    contest_id: "sonnet-2",
+    game_id: "lumen-2",
+    room_generation: 1,
+    version,
+    previous_state_hash: stateHash,
+    word,
+    request_id: requestId
+  });
+  const seq = await publishReply(SONNET_2_LUMEN_ROOM, text, env);
+  return { action: "published", seq, version, word };
+}
+
 export function hasSonnetRecruitment(messages) {
   return (messages || []).some((record) =>
     record?.from === EXPECTED_AGENT_DID
@@ -878,7 +1006,8 @@ export default {
       const sonnet2Lumen = await publishSonnet2LumenContinuityOnce(env);
       const sonnet2LumenNudge = await publishSonnet2LumenNudgeOnce(env);
       const sonnet2Roster = await publishSonnet2RosterConsentOnce(env);
-      sonnet = { whale, lumen, openInvite, prepNote, lumenConfirmation, sonnet2Registration, sonnet2Lumen, sonnet2LumenNudge, sonnet2Roster };
+      const sonnet2Word = await publishSonnet2WordOnce(env);
+      sonnet = { whale, lumen, openInvite, prepNote, lumenConfirmation, sonnet2Registration, sonnet2Lumen, sonnet2LumenNudge, sonnet2Roster, sonnet2Word };
     } catch (error) {
       sonnet = { action: "error", error: String(error?.message || error) };
       console.error(JSON.stringify({ action: "sonnet-recruitment-error", error: sonnet.error }));
