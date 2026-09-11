@@ -5,6 +5,7 @@ import {
   decideWithModel,
   hasLumenRecruitment,
   hasOpenInvite,
+  hasSonnetPrepNote,
   hasSonnetRecruitment,
   isLowInformationContext,
   listenForProbeWindow,
@@ -16,6 +17,7 @@ import {
   publishReply,
   publishLumenRecruitmentOnce,
   publishOpenInviteOnce,
+  publishSonnetPrepNoteOnce,
   publishSonnetRecruitmentOnce,
   scanOnce,
   validateProbeDecision,
@@ -43,6 +45,12 @@ test("detects the open invitation independently of direct applications", () => {
   assert.equal(hasOpenInvite([{ from: did, text: '{"request_id":"mabolla-open-invites-1"}' }]), true);
 });
 
+test("detects the sonnet preparation proof independently of recruitment", () => {
+  const did = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
+  assert.equal(hasSonnetPrepNote([{ from: did, text: '{"request_id":"mabolla-open-invites-1"}' }]), false);
+  assert.equal(hasSonnetPrepNote([{ from: did, text: '{"request_id":"mabolla-prep-proof-1"}' }]), true);
+});
+
 test("sonnet recruitment is disabled by default and performs no network work", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error("unexpected fetch"); };
@@ -50,6 +58,7 @@ test("sonnet recruitment is disabled by default and performs no network work", a
     assert.deepEqual(await publishSonnetRecruitmentOnce({}), { action: "disabled" });
     assert.deepEqual(await publishLumenRecruitmentOnce({}), { action: "disabled" });
     assert.deepEqual(await publishOpenInviteOnce({}), { action: "disabled" });
+    assert.deepEqual(await publishSonnetPrepNoteOnce({}), { action: "disabled" });
   } finally {
     globalThis.fetch = originalFetch;
   }
