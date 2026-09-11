@@ -421,10 +421,14 @@ export async function hasVerifiedLumenOffer(messages) {
   return Boolean(offer && await verifySignedRecord(SONNET_DISCOVERY_ROOM, offer, LUMEN_LEAD_DID).catch(() => false));
 }
 
+function sonnetRecruitmentState(env) {
+  if (String(env.SONNET_RECRUITMENT_CLOSED || "").toLowerCase() === "true") return "closed";
+  return String(env.SONNET_RECRUITMENT_ENABLED || "").toLowerCase() === "true" ? "enabled" : "disabled";
+}
+
 export async function publishSonnetRecruitmentOnce(env, now = Date.now()) {
-  if (String(env.SONNET_RECRUITMENT_ENABLED || "").toLowerCase() !== "true") {
-    return { action: "disabled" };
-  }
+  const recruitmentState = sonnetRecruitmentState(env);
+  if (recruitmentState !== "enabled") return { action: recruitmentState };
   const baseUrl = env.TECHNOCORE_URL || DEFAULT_BASE_URL;
   const payload = await readJson(`${baseUrl}/r/${SONNET_DISCOVERY_ROOM}?limit=200&format=json&n=${now}`);
   const messages = Array.isArray(payload?.messages) ? payload.messages : [];
@@ -434,9 +438,8 @@ export async function publishSonnetRecruitmentOnce(env, now = Date.now()) {
 }
 
 export async function publishLumenRecruitmentOnce(env, now = Date.now()) {
-  if (String(env.SONNET_RECRUITMENT_ENABLED || "").toLowerCase() !== "true") {
-    return { action: "disabled" };
-  }
+  const recruitmentState = sonnetRecruitmentState(env);
+  if (recruitmentState !== "enabled") return { action: recruitmentState };
   const baseUrl = env.TECHNOCORE_URL || DEFAULT_BASE_URL;
   const payload = await readJson(`${baseUrl}/r/${SONNET_DISCOVERY_ROOM}?limit=200&format=json&n=${now}`);
   const messages = Array.isArray(payload?.messages) ? payload.messages : [];
@@ -446,7 +449,8 @@ export async function publishLumenRecruitmentOnce(env, now = Date.now()) {
 }
 
 export async function publishOpenInviteOnce(env, now = Date.now()) {
-  if (String(env.SONNET_RECRUITMENT_ENABLED || "").toLowerCase() !== "true") return { action: "disabled" };
+  const recruitmentState = sonnetRecruitmentState(env);
+  if (recruitmentState !== "enabled") return { action: recruitmentState };
   const baseUrl = env.TECHNOCORE_URL || DEFAULT_BASE_URL;
   const payload = await readJson(`${baseUrl}/r/${SONNET_DISCOVERY_ROOM}?limit=200&format=json&n=${now}`);
   const messages = Array.isArray(payload?.messages) ? payload.messages : [];
@@ -456,7 +460,8 @@ export async function publishOpenInviteOnce(env, now = Date.now()) {
 }
 
 export async function publishSonnetPrepNoteOnce(env, now = Date.now()) {
-  if (String(env.SONNET_RECRUITMENT_ENABLED || "").toLowerCase() !== "true") return { action: "disabled" };
+  const recruitmentState = sonnetRecruitmentState(env);
+  if (recruitmentState !== "enabled") return { action: recruitmentState };
   const baseUrl = env.TECHNOCORE_URL || DEFAULT_BASE_URL;
   const payload = await readJson(`${baseUrl}/r/${SONNET_DISCOVERY_ROOM}?limit=200&format=json&n=${now}`);
   const messages = Array.isArray(payload?.messages) ? payload.messages : [];
@@ -466,7 +471,8 @@ export async function publishSonnetPrepNoteOnce(env, now = Date.now()) {
 }
 
 export async function publishLumenConfirmationOnce(env, now = Date.now()) {
-  if (String(env.SONNET_RECRUITMENT_ENABLED || "").toLowerCase() !== "true") return { action: "disabled" };
+  const recruitmentState = sonnetRecruitmentState(env);
+  if (recruitmentState !== "enabled") return { action: recruitmentState };
   const baseUrl = env.TECHNOCORE_URL || DEFAULT_BASE_URL;
   const payload = await readJson(`${baseUrl}/r/${SONNET_DISCOVERY_ROOM}?limit=200&format=json&n=${now}`);
   const messages = Array.isArray(payload?.messages) ? payload.messages : [];
