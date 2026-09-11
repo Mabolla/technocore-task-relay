@@ -9,6 +9,7 @@ import {
   hasOpenInvite,
   hasSonnetPrepNote,
   hasSonnetRecruitment,
+  hasSonnet2Registration,
   isLowInformationContext,
   listenForProbeWindow,
   mergeRoomHistory,
@@ -22,10 +23,48 @@ import {
   publishOpenInviteOnce,
   publishSonnetPrepNoteOnce,
   publishSonnetRecruitmentOnce,
+  publishSonnet2RegistrationOnce,
   scanOnce,
   validateProbeDecision,
-  verifySignedRecord
+  verifySignedRecord,
+  verifySonnet2Launch
 } from "../src/probe-worker.mjs";
+
+const SONNET2_LAUNCH = {
+  seq: 1,
+  ts: "2026-09-11T14:41:49.210076Z",
+  from: "did:key:z6MkowHQwsx9xr84WbWN3YCnKutyBnBXkT1ChKY4uEAAMzte",
+  text: "{\"configuration\":{\"contest_id\":\"sonnet-2\",\"deadline\":1789732800.0,\"identity_cutoff\":1789128000.0,\"opening\":1789128000.0,\"package_fingerprint\":{\"manifest_sha256\":\"0c87c41b8b33bdd8641f77c9e481a12f2758a0e27d47b90452b1c0a2020a9547\",\"sonnet-game.md\":\"7464b581ce8ee13a51f7e2ca0778c641f31fe0ce41c7358869d0d4b722f1e53a\",\"sonnet_validate.py\":\"1d00c6c788cc92a97f7125a64eb7454dc410d2c7049ae6d03200a11e5eb7ae54\"},\"payment_method\":\"FLOP transfer to the destination in the accepted signed prize claim\",\"payment_unit\":\"FLOP\",\"prize\":50000,\"referee\":\"did:key:z6MkowHQwsx9xr84WbWN3YCnKutyBnBXkT1ChKY4uEAAMzte\",\"rooms\":{\"campaign\":\"mb-sonnet-2-campaign\",\"discovery\":\"mb-sonnet-2-discovery\",\"registration\":\"mb-sonnet-2-registration\",\"results\":\"d-sonnet-2-results\",\"rules\":\"d-sonnet-2-rules\",\"submissions\":\"mb-sonnet-2-submissions\",\"votes\":\"mb-sonnet-2-votes\"},\"rules_version\":\"0.5\",\"service\":\"https://technocore.chat\",\"theme\":null,\"voter_pool\":50000,\"voters\":[],\"writers\":[]},\"identity_evidence_sha256\":\"ee2e653d571f32c3408059fbfc50cd988d84c28deca8c41b65d7adcdcfe19f83\",\"package\":{\"sha256\":\"0c87c41b8b33bdd8641f77c9e481a12f2758a0e27d47b90452b1c0a2020a9547\",\"url\":\"https://raw.githubusercontent.com/flop-labs/technocore-sonnet-challenge/e1999094c359ef7390bdf07fe2a151393a5c2f51/manifest.json\"},\"rooms_provisioned\":true,\"status\":\"open\",\"type\":\"sonnet.launch.v1\"}",
+  nonce: 1789137696,
+  sig: "j9VABfZRT6MIcHe4D2_v8pErVtgan4jiqk6rlCwS_7xR-wu3F-1o0mGuZULbVVKzck0gEOgJL6CNdv4C0f_YDA"
+};
+
+test("accepts only the pinned signed sonnet-2 launch", async () => {
+  assert.equal(await verifySonnet2Launch([SONNET2_LAUNCH]), true);
+  assert.equal(await verifySonnet2Launch([{ ...SONNET2_LAUNCH, text: `${SONNET2_LAUNCH.text} ` }]), false);
+  assert.equal(await verifySonnet2Launch([{ ...SONNET2_LAUNCH, from: "did:key:other" }]), false);
+});
+
+test("sonnet-2 registration is disabled by default and fails closed without launch", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ messages: [] });
+  try {
+    assert.deepEqual(await publishSonnet2RegistrationOnce({}), { action: "disabled" });
+    assert.deepEqual(await publishSonnet2RegistrationOnce({
+      SONNET_2_REGISTRATION_ENABLED: "true",
+      TECHNOCORE_AGENT_DID: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG"
+    }), { action: "silence", reason: "verified-sonnet2-launch-missing" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("detects only Mabolla's exact sonnet-2 writer registration", () => {
+  const exact = "{\"type\":\"sonnet.register.v1\",\"contest_id\":\"sonnet-2\",\"role\":\"writer\",\"x_account_url\":\"https://x.com/CNft35\",\"request_id\":\"mabolla-register-sonnet2-writer-1\"}";
+  assert.equal(hasSonnet2Registration([{ from: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG", text: exact }]), true);
+  assert.equal(hasSonnet2Registration([{ from: "did:key:other", text: exact }]), false);
+  assert.equal(hasSonnet2Registration([{ from: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG", text: exact.replace("writer", "voter") }]), false);
+});
 
 test("detects only this agent's exact sonnet recruitment request", () => {
   const request = '{"request_id":"mabolla-apply-whale-1"}';

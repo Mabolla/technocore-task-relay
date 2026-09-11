@@ -14,6 +14,18 @@ const SONNET_PREP_NOTE_REQUEST_ID = "mabolla-prep-proof-1";
 const LUMEN_CONFIRMATION_REQUEST_ID = "mabolla-confirm-lumen-1";
 const LUMEN_LEAD_DID = "did:key:z6Mkk6SzbwtaCRYLZvFT3YnZ5QfwR57KXGZLLoUtjPkiXshH";
 const LUMEN_OFFER_SEQ = 203;
+const SONNET_2_RULES_ROOM = "d-sonnet-2-rules";
+const SONNET_2_REGISTRATION_ROOM = "mb-sonnet-2-registration";
+const SONNET_2_REFEREE_DID = "did:key:z6MkowHQwsx9xr84WbWN3YCnKutyBnBXkT1ChKY4uEAAMzte";
+const SONNET_2_MANIFEST_SHA256 = "0c87c41b8b33bdd8641f77c9e481a12f2758a0e27d47b90452b1c0a2020a9547";
+const SONNET_2_REGISTRATION_REQUEST_ID = "mabolla-register-sonnet2-writer-1";
+const SONNET_2_REGISTRATION_TEXT = JSON.stringify({
+  type: "sonnet.register.v1",
+  contest_id: "sonnet-2",
+  role: "writer",
+  x_account_url: "https://x.com/CNft35",
+  request_id: SONNET_2_REGISTRATION_REQUEST_ID
+});
 const SONNET_RECRUITMENT_TEXT = JSON.stringify({
   type: "sonnet.recruit.v1",
   contest_id: "sonnet-1",
@@ -375,6 +387,62 @@ export async function publishReply(room, text, env) {
   return accepted.seq;
 }
 
+export function hasSonnet2Registration(messages) {
+  return (messages || []).some((record) =>
+    record?.from === EXPECTED_AGENT_DID
+      && record?.text === SONNET_2_REGISTRATION_TEXT
+  );
+}
+
+export async function verifySonnet2Launch(messages) {
+  const record = (messages || []).find((item) =>
+    Number(item?.seq) === 1 && item?.from === SONNET_2_REFEREE_DID
+  );
+  if (!record || !await verifySignedRecord(SONNET_2_RULES_ROOM, record, SONNET_2_REFEREE_DID).catch(() => false)) {
+    return false;
+  }
+  let launch;
+  try {
+    launch = JSON.parse(record.text);
+  } catch {
+    return false;
+  }
+  return launch?.type === "sonnet.launch.v1"
+    && launch?.status === "open"
+    && launch?.rooms_provisioned === true
+    && launch?.configuration?.contest_id === "sonnet-2"
+    && launch?.configuration?.rules_version === "0.5"
+    && launch?.configuration?.referee === SONNET_2_REFEREE_DID
+    && launch?.configuration?.rooms?.rules === SONNET_2_RULES_ROOM
+    && launch?.configuration?.rooms?.registration === SONNET_2_REGISTRATION_ROOM
+    && launch?.configuration?.package_fingerprint?.manifest_sha256 === SONNET_2_MANIFEST_SHA256
+    && launch?.package?.sha256 === SONNET_2_MANIFEST_SHA256;
+}
+
+function sonnet2RegistrationState(env) {
+  if (String(env.SONNET_2_REGISTRATION_CLOSED || "").toLowerCase() === "true") return "closed";
+  return String(env.SONNET_2_REGISTRATION_ENABLED || "").toLowerCase() === "true" ? "enabled" : "disabled";
+}
+
+export async function publishSonnet2RegistrationOnce(env, now = Date.now()) {
+  const state = sonnet2RegistrationState(env);
+  if (state !== "enabled") return { action: state };
+  if (env.TECHNOCORE_AGENT_DID !== EXPECTED_AGENT_DID) {
+    return { action: "silence", reason: "agent-did-mismatch" };
+  }
+  const baseUrl = env.TECHNOCORE_URL || DEFAULT_BASE_URL;
+  const launchPayload = await readJson(`${baseUrl}/r/${SONNET_2_RULES_ROOM}?limit=10&format=json&n=${now}`);
+  const launchMessages = Array.isArray(launchPayload?.messages) ? launchPayload.messages : [];
+  if (!await verifySonnet2Launch(launchMessages)) {
+    return { action: "silence", reason: "verified-sonnet2-launch-missing" };
+  }
+  const registrationPayload = await readJson(`${baseUrl}/r/${SONNET_2_REGISTRATION_ROOM}?limit=200&format=json&n=${now}`);
+  const registrationMessages = Array.isArray(registrationPayload?.messages) ? registrationPayload.messages : [];
+  if (hasSonnet2Registration(registrationMessages)) return { action: "already-published" };
+  const seq = await publishReply(SONNET_2_REGISTRATION_ROOM, SONNET_2_REGISTRATION_TEXT, env);
+  return { action: "published", seq };
+}
+
 export function hasSonnetRecruitment(messages) {
   return (messages || []).some((record) =>
     record?.from === EXPECTED_AGENT_DID
@@ -610,7 +678,8 @@ export default {
       const openInvite = await publishOpenInviteOnce(env);
       const prepNote = await publishSonnetPrepNoteOnce(env);
       const lumenConfirmation = await publishLumenConfirmationOnce(env);
-      sonnet = { whale, lumen, openInvite, prepNote, lumenConfirmation };
+      const sonnet2Registration = await publishSonnet2RegistrationOnce(env);
+      sonnet = { whale, lumen, openInvite, prepNote, lumenConfirmation, sonnet2Registration };
     } catch (error) {
       sonnet = { action: "error", error: String(error?.message || error) };
       console.error(JSON.stringify({ action: "sonnet-recruitment-error", error: sonnet.error }));
