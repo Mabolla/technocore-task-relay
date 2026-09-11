@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildProbeContext,
   decideWithModel,
+  hasLumenRecruitment,
   hasSonnetRecruitment,
   isLowInformationContext,
   listenForProbeWindow,
@@ -12,6 +13,7 @@ import {
   parseProbeReply,
   probeAgeMs,
   publishReply,
+  publishLumenRecruitmentOnce,
   publishSonnetRecruitmentOnce,
   scanOnce,
   validateProbeDecision,
@@ -27,11 +29,18 @@ test("detects only this agent's exact sonnet recruitment request", () => {
   }]), true);
 });
 
+test("detects the lumen application independently of the whale application", () => {
+  const did = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
+  assert.equal(hasLumenRecruitment([{ from: did, text: '{"request_id":"mabolla-apply-whale-1"}' }]), false);
+  assert.equal(hasLumenRecruitment([{ from: did, text: '{"request_id":"mabolla-apply-lumen-1"}' }]), true);
+});
+
 test("sonnet recruitment is disabled by default and performs no network work", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error("unexpected fetch"); };
   try {
     assert.deepEqual(await publishSonnetRecruitmentOnce({}), { action: "disabled" });
+    assert.deepEqual(await publishLumenRecruitmentOnce({}), { action: "disabled" });
   } finally {
     globalThis.fetch = originalFetch;
   }
