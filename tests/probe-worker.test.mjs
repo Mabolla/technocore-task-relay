@@ -30,8 +30,10 @@ import {
   publishSonnet2LumenNudgeOnce,
   verifySonnet2LumenSetup,
   hasSonnet2RosterConsent,
+  hasSonnet2RosterWithdrawal,
   hasVerifiedLeadRoster,
   hasVerifiedAcceptedLeadReceipt,
+  hasVerifiedAcceptedRosterWithdrawalReceipt,
   publishSonnet2RosterConsentOnce,
   scanOnce,
   validateProbeDecision,
@@ -668,18 +670,27 @@ test("accepts the official DID signature and rejects tampering", async () => {
 
 
 const LUMEN2_LEAD_ROSTER = {
-  seq: 2054,
+  seq: 2598,
   from: "did:key:z6Mkk6SzbwtaCRYLZvFT3YnZ5QfwR57KXGZLLoUtjPkiXshH",
-  text: "{\"type\":\"sonnet.roster.v1\",\"contest_id\":\"sonnet-2\",\"game_id\":\"lumen-2\",\"poem_room\":\"d-sonnet-2-team-lumen-2\",\"room_generation\":1,\"members\":[\"did:key:z6Mkk6SzbwtaCRYLZvFT3YnZ5QfwR57KXGZLLoUtjPkiXshH\",\"did:key:z6MktjZcS1ooLucTwx23AE7F2Td9PMSEAkMAvgBnA2RZhkq8\",\"did:key:z6MkiCncSyKpYegpwdwK2QXK3YCudRTa1pVU273o7Xf4oe3d\",\"did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG\"],\"request_id\":\"lumen-2-four-roster-lead-1\"}",
-  nonce: 1789155876327,
-  sig: "rG_zgzLVmGwlzpcjx95GGEED8mLqtPXNtg1akhMvxUlOjOsRf-4GYus25qEN-nBVCC0ywHfsDAS4Ny1U9DjWAw"
+  text: "{\"type\":\"sonnet.roster.v1\",\"contest_id\":\"sonnet-2\",\"game_id\":\"lumen-2\",\"poem_room\":\"d-sonnet-2-team-lumen-2\",\"room_generation\":1,\"members\":[\"did:key:z6Mkk6SzbwtaCRYLZvFT3YnZ5QfwR57KXGZLLoUtjPkiXshH\",\"did:key:z6Mkt76apcEAbwsgmZQRTDRU4YRQfvYFoGNPoLd5JfXsjKUc\",\"did:key:z6MkiCncSyKpYegpwdwK2QXK3YCudRTa1pVU273o7Xf4oe3d\",\"did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG\"],\"request_id\":\"lumen-2-four-roster-vlsss12-1\"}",
+  nonce: 1789160738428,
+  sig: "tR06xNQMm4xPAAUBItg5TBi04WuigyEfeA1IwRf0AsKH0doRA806F_7HaygVcUfMVVkNf20mkY8nBlDWOAm3Cg"
 };
 const LUMEN2_LEAD_RECEIPT = {
-  seq: 2060,
+  seq: 2601,
   from: "did:key:z6MkowHQwsx9xr84WbWN3YCnKutyBnBXkT1ChKY4uEAAMzte",
-  text: "{\"contest_id\":\"sonnet-2\",\"intake_seq\":3642,\"reason\":\"\",\"received_at\":1789155901.3505452,\"request_id\":\"lumen-2-four-roster-lead-1\",\"roster_ready\":false,\"sender_did\":\"did:key:z6Mkk6SzbwtaCRYLZvFT3YnZ5QfwR57KXGZLLoUtjPkiXshH\",\"state_hash\":\"7444038692d4a98b81d523604987e232dec2d79e0ea3a9175d7fe83d903558e4\",\"status\":\"accepted\",\"type\":\"sonnet.receipt.v1\"}",
-  nonce: 1789155901368,
-  sig: "HrfEZR0VP4qNaJReIPu5YFkhAz5FR9Pm2prUjOtqmCC3F-8aiV0E9i0cMEczCqNt_TFCX7OjvTw8m0a8fqJqAw"
+  text: "{\"contest_id\":\"sonnet-2\",\"intake_seq\":4991,\"reason\":\"\",\"received_at\":1789160796.7557547,\"request_id\":\"lumen-2-four-roster-vlsss12-1\",\"roster_ready\":false,\"sender_did\":\"did:key:z6Mkk6SzbwtaCRYLZvFT3YnZ5QfwR57KXGZLLoUtjPkiXshH\",\"state_hash\":\"7444038692d4a98b81d523604987e232dec2d79e0ea3a9175d7fe83d903558e4\",\"status\":\"accepted\",\"type\":\"sonnet.receipt.v1\"}",
+  nonce: 1789160796774,
+  sig: "DLnAIU9ENRUtdXNuRiIcWuTBsYu_IMeaMdois3m4ALhHV6GTLNmlQlfjeDP2HSNS4ucOAn4D767ZaF_VM4p0CA"
+};
+
+const MABOLLA_WITHDRAWAL_TEXT = "{\"type\":\"sonnet.withdraw.v1\",\"contest_id\":\"sonnet-2\",\"game_id\":\"lumen-2\",\"request_id\":\"mabolla-lumen-2-withdraw-cow-list-1\"}";
+const MABOLLA_WITHDRAWAL_RECEIPT = {
+  seq: 1,
+  from: "did:key:z6MkowHQwsx9xr84WbWN3YCnKutyBnBXkT1ChKY4uEAAMzte",
+  text: "{\"contest_id\":\"sonnet-2\",\"intake_seq\":1,\"reason\":\"\",\"received_at\":1789160796,\"request_id\":\"mabolla-lumen-2-withdraw-cow-list-1\",\"sender_did\":\"did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG\",\"status\":\"accepted\",\"type\":\"sonnet.receipt.v1\"}",
+  nonce: 1,
+  sig: "invalid-placeholder"
 };
 
 test("pins the exact signed four-member Lumen roster and referee acceptance", async () => {
@@ -698,7 +709,31 @@ test("Lumen roster consent defaults fail closed", async () => {
 });
 
 test("detects only Mabolla exact four-member roster consent", () => {
-  const text = "{\"type\":\"sonnet.roster.v1\",\"contest_id\":\"sonnet-2\",\"game_id\":\"lumen-2\",\"poem_room\":\"d-sonnet-2-team-lumen-2\",\"room_generation\":1,\"members\":[\"did:key:z6Mkk6SzbwtaCRYLZvFT3YnZ5QfwR57KXGZLLoUtjPkiXshH\",\"did:key:z6MktjZcS1ooLucTwx23AE7F2Td9PMSEAkMAvgBnA2RZhkq8\",\"did:key:z6MkiCncSyKpYegpwdwK2QXK3YCudRTa1pVU273o7Xf4oe3d\",\"did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG\"],\"request_id\":\"mabolla-lumen-2-four-roster-1\"}";
+  const text = "{\"type\":\"sonnet.roster.v1\",\"contest_id\":\"sonnet-2\",\"game_id\":\"lumen-2\",\"poem_room\":\"d-sonnet-2-team-lumen-2\",\"room_generation\":1,\"members\":[\"did:key:z6Mkk6SzbwtaCRYLZvFT3YnZ5QfwR57KXGZLLoUtjPkiXshH\",\"did:key:z6Mkt76apcEAbwsgmZQRTDRU4YRQfvYFoGNPoLd5JfXsjKUc\",\"did:key:z6MkiCncSyKpYegpwdwK2QXK3YCudRTa1pVU273o7Xf4oe3d\",\"did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG\"],\"request_id\":\"mabolla-lumen-2-four-roster-vlsss12-1\"}";
   assert.equal(hasSonnet2RosterConsent([{ from: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG", text }]), true);
   assert.equal(hasSonnet2RosterConsent([{ from: "did:key:other", text }]), false);
+});
+
+test("requires Mabolla's exact withdrawal before the replacement roster", () => {
+  assert.equal(hasSonnet2RosterWithdrawal([{ from: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG", text: MABOLLA_WITHDRAWAL_TEXT }]), true);
+  assert.equal(hasSonnet2RosterWithdrawal([{ from: "did:key:other", text: MABOLLA_WITHDRAWAL_TEXT }]), false);
+});
+
+test("fails closed after withdrawal until the referee acceptance is signed", async () => {
+  assert.equal(await hasVerifiedAcceptedRosterWithdrawalReceipt([MABOLLA_WITHDRAWAL_RECEIPT]), false);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ messages: [
+    LUMEN2_LEAD_ROSTER,
+    LUMEN2_LEAD_RECEIPT,
+    { from: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG", text: MABOLLA_WITHDRAWAL_TEXT },
+    MABOLLA_WITHDRAWAL_RECEIPT
+  ] });
+  try {
+    assert.deepEqual(await publishSonnet2RosterConsentOnce({
+      SONNET_2_ROSTER_ENABLED: "true",
+      TECHNOCORE_AGENT_DID: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG"
+    }), { action: "silence", reason: "accepted-roster-withdrawal-receipt-missing" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

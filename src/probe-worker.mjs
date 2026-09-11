@@ -49,11 +49,19 @@ const SONNET_2_LUMEN_NUDGE_TEXT = JSON.stringify({
 });
 const SONNET_2_LUMEN_MEMBERS = [
   LUMEN_LEAD_DID,
-  "did:key:z6MktjZcS1ooLucTwx23AE7F2Td9PMSEAkMAvgBnA2RZhkq8",
+  "did:key:z6Mkt76apcEAbwsgmZQRTDRU4YRQfvYFoGNPoLd5JfXsjKUc",
   "did:key:z6MkiCncSyKpYegpwdwK2QXK3YCudRTa1pVU273o7Xf4oe3d",
   EXPECTED_AGENT_DID
 ];
-const SONNET_2_ROSTER_REQUEST_ID = "mabolla-lumen-2-four-roster-1";
+const SONNET_2_LEAD_ROSTER_REQUEST_ID = "lumen-2-four-roster-vlsss12-1";
+const SONNET_2_ROSTER_WITHDRAW_REQUEST_ID = "mabolla-lumen-2-withdraw-cow-list-1";
+const SONNET_2_ROSTER_WITHDRAW_TEXT = JSON.stringify({
+  type: "sonnet.withdraw.v1",
+  contest_id: "sonnet-2",
+  game_id: "lumen-2",
+  request_id: SONNET_2_ROSTER_WITHDRAW_REQUEST_ID
+});
+const SONNET_2_ROSTER_REQUEST_ID = "mabolla-lumen-2-four-roster-vlsss12-1";
 const SONNET_2_ROSTER_TEXT = JSON.stringify({
   type: "sonnet.roster.v1",
   contest_id: "sonnet-2",
@@ -558,6 +566,10 @@ export function hasSonnet2RosterConsent(messages) {
   return (messages || []).some((record) => record?.from === EXPECTED_AGENT_DID && record?.text === SONNET_2_ROSTER_TEXT);
 }
 
+export function hasSonnet2RosterWithdrawal(messages) {
+  return (messages || []).some((record) => record?.from === EXPECTED_AGENT_DID && record?.text === SONNET_2_ROSTER_WITHDRAW_TEXT);
+}
+
 export async function hasVerifiedLeadRoster(messages) {
   for (const record of messages || []) {
     if (record?.from !== LUMEN_LEAD_DID) continue;
@@ -570,7 +582,7 @@ export async function hasVerifiedLeadRoster(messages) {
       && body?.poem_room === SONNET_2_LUMEN_ROOM
       && body?.room_generation === 1
       && JSON.stringify(body?.members) === JSON.stringify(SONNET_2_LUMEN_MEMBERS)
-      && body?.request_id === "lumen-2-four-roster-lead-1") return true;
+      && body?.request_id === SONNET_2_LEAD_ROSTER_REQUEST_ID) return true;
   }
   return false;
 }
@@ -583,10 +595,25 @@ export async function hasVerifiedAcceptedLeadReceipt(messages) {
     try { body = JSON.parse(record.text); } catch { continue; }
     if (body?.type === "sonnet.receipt.v1"
       && body?.contest_id === "sonnet-2"
-      && body?.request_id === "lumen-2-four-roster-lead-1"
+      && body?.request_id === SONNET_2_LEAD_ROSTER_REQUEST_ID
       && body?.sender_did === LUMEN_LEAD_DID
       && body?.status === "accepted"
       && body?.roster_ready === false) return true;
+  }
+  return false;
+}
+
+export async function hasVerifiedAcceptedRosterWithdrawalReceipt(messages) {
+  for (const record of messages || []) {
+    if (record?.from !== SONNET_2_REFEREE_DID) continue;
+    if (!await verifySignedRecord(SONNET_2_DISCOVERY_ROOM, record, SONNET_2_REFEREE_DID).catch(() => false)) continue;
+    let body;
+    try { body = JSON.parse(record.text); } catch { continue; }
+    if (body?.type === "sonnet.receipt.v1"
+      && body?.contest_id === "sonnet-2"
+      && body?.request_id === SONNET_2_ROSTER_WITHDRAW_REQUEST_ID
+      && body?.sender_did === EXPECTED_AGENT_DID
+      && body?.status === "accepted") return true;
   }
   return false;
 }
@@ -601,6 +628,13 @@ export async function publishSonnet2RosterConsentOnce(env, now = Date.now()) {
   if (hasSonnet2RosterConsent(messages)) return { action: "already-published" };
   if (!await hasVerifiedLeadRoster(messages)) return { action: "silence", reason: "verified-exact-lead-roster-missing" };
   if (!await hasVerifiedAcceptedLeadReceipt(messages)) return { action: "silence", reason: "accepted-lead-roster-receipt-missing" };
+  if (!hasSonnet2RosterWithdrawal(messages)) {
+    const seq = await publishReply(SONNET_2_DISCOVERY_ROOM, SONNET_2_ROSTER_WITHDRAW_TEXT, env);
+    return { action: "withdrawal-published", seq };
+  }
+  if (!await hasVerifiedAcceptedRosterWithdrawalReceipt(messages)) {
+    return { action: "silence", reason: "accepted-roster-withdrawal-receipt-missing" };
+  }
   const seq = await publishReply(SONNET_2_DISCOVERY_ROOM, SONNET_2_ROSTER_TEXT, env);
   return { action: "published", seq };
 }
