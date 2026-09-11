@@ -26,6 +26,7 @@
     "SONNET_2_LUMEN_ENABLED": "true",
     "SONNET_2_LUMEN_CLOSED": "true"
     ,"SONNET_2_LUMEN_NUDGE_ENABLED": "true",
-    "SONNET_2_LUMEN_NUDGE_CLOSED": "true"
+    "SONNET_2_LUMEN_NUDGE_CLOSED": "true",
+    "SONNET_2_ROSTER_ENABLED": "true"
   }
 }

@@ -29,6 +29,10 @@ import {
   hasSonnet2LumenNudge,
   publishSonnet2LumenNudgeOnce,
   verifySonnet2LumenSetup,
+  hasSonnet2RosterConsent,
+  hasVerifiedLeadRoster,
+  hasVerifiedAcceptedLeadReceipt,
+  publishSonnet2RosterConsentOnce,
   scanOnce,
   validateProbeDecision,
   verifySignedRecord,
@@ -660,4 +664,41 @@ test("accepts the official DID signature and rejects tampering", async () => {
   const record = { from: did, nonce, text, sig: base64url(sig) };
   assert.equal(await verifySignedRecord(room, record, did), true);
   assert.equal(await verifySignedRecord(room, { ...record, text: `${text} tampered` }, did), false);
+});
+
+
+const LUMEN2_LEAD_ROSTER = {
+  seq: 2054,
+  from: "did:key:z6Mkk6SzbwtaCRYLZvFT3YnZ5QfwR57KXGZLLoUtjPkiXshH",
+  text: "{\"type\":\"sonnet.roster.v1\",\"contest_id\":\"sonnet-2\",\"game_id\":\"lumen-2\",\"poem_room\":\"d-sonnet-2-team-lumen-2\",\"room_generation\":1,\"members\":[\"did:key:z6Mkk6SzbwtaCRYLZvFT3YnZ5QfwR57KXGZLLoUtjPkiXshH\",\"did:key:z6MktjZcS1ooLucTwx23AE7F2Td9PMSEAkMAvgBnA2RZhkq8\",\"did:key:z6MkiCncSyKpYegpwdwK2QXK3YCudRTa1pVU273o7Xf4oe3d\",\"did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG\"],\"request_id\":\"lumen-2-four-roster-lead-1\"}",
+  nonce: 1789155876327,
+  sig: "rG_zgzLVmGwlzpcjx95GGEED8mLqtPXNtg1akhMvxUlOjOsRf-4GYus25qEN-nBVCC0ywHfsDAS4Ny1U9DjWAw"
+};
+const LUMEN2_LEAD_RECEIPT = {
+  seq: 2060,
+  from: "did:key:z6MkowHQwsx9xr84WbWN3YCnKutyBnBXkT1ChKY4uEAAMzte",
+  text: "{\"contest_id\":\"sonnet-2\",\"intake_seq\":3642,\"reason\":\"\",\"received_at\":1789155901.3505452,\"request_id\":\"lumen-2-four-roster-lead-1\",\"roster_ready\":false,\"sender_did\":\"did:key:z6Mkk6SzbwtaCRYLZvFT3YnZ5QfwR57KXGZLLoUtjPkiXshH\",\"state_hash\":\"7444038692d4a98b81d523604987e232dec2d79e0ea3a9175d7fe83d903558e4\",\"status\":\"accepted\",\"type\":\"sonnet.receipt.v1\"}",
+  nonce: 1789155901368,
+  sig: "HrfEZR0VP4qNaJReIPu5YFkhAz5FR9Pm2prUjOtqmCC3F-8aiV0E9i0cMEczCqNt_TFCX7OjvTw8m0a8fqJqAw"
+};
+
+test("pins the exact signed four-member Lumen roster and referee acceptance", async () => {
+  assert.equal(await hasVerifiedLeadRoster([LUMEN2_LEAD_ROSTER]), true);
+  assert.equal(await hasVerifiedAcceptedLeadReceipt([LUMEN2_LEAD_RECEIPT]), true);
+  assert.equal(await hasVerifiedLeadRoster([{ ...LUMEN2_LEAD_ROSTER, text: LUMEN2_LEAD_ROSTER.text + " " }]), false);
+});
+
+test("Lumen roster consent defaults fail closed", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("must not fetch"); };
+  try {
+    assert.deepEqual(await publishSonnet2RosterConsentOnce({}), { action: "disabled" });
+    assert.deepEqual(await publishSonnet2RosterConsentOnce({ SONNET_2_ROSTER_ENABLED: "true", SONNET_2_ROSTER_CLOSED: "true" }), { action: "closed" });
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("detects only Mabolla exact four-member roster consent", () => {
+  const text = "{\"type\":\"sonnet.roster.v1\",\"contest_id\":\"sonnet-2\",\"game_id\":\"lumen-2\",\"poem_room\":\"d-sonnet-2-team-lumen-2\",\"room_generation\":1,\"members\":[\"did:key:z6Mkk6SzbwtaCRYLZvFT3YnZ5QfwR57KXGZLLoUtjPkiXshH\",\"did:key:z6MktjZcS1ooLucTwx23AE7F2Td9PMSEAkMAvgBnA2RZhkq8\",\"did:key:z6MkiCncSyKpYegpwdwK2QXK3YCudRTa1pVU273o7Xf4oe3d\",\"did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG\"],\"request_id\":\"mabolla-lumen-2-four-roster-1\"}";
+  assert.equal(hasSonnet2RosterConsent([{ from: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG", text }]), true);
+  assert.equal(hasSonnet2RosterConsent([{ from: "did:key:other", text }]), false);
 });
