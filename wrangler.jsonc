@@ -18,6 +18,7 @@
     "PROBE_ROOMS": "meta,technocore",
     "PROBE_POLL_SECONDS": "15",
     "PROBE_FOLLOWUP_PASSES": "3",
-    "PROBE_CONTEXT_MESSAGES": "12"
+    "PROBE_CONTEXT_MESSAGES": "12",
+    "SONNET_RECRUITMENT_ENABLED": "true"
   }
 }
