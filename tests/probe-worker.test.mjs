@@ -35,6 +35,8 @@ import {
   hasVerifiedAcceptedLeadReceipt,
   hasVerifiedAcceptedRosterWithdrawalReceipt,
   publishSonnet2RosterConsentOnce,
+  publishSonnet2WordOnce,
+  evaluateSonnet2WordProgress,
   scanOnce,
   validateProbeDecision,
   verifySignedRecord,
@@ -736,4 +738,70 @@ test("fails closed after withdrawal until the referee acceptance is signed", asy
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+const LUMEN2_ROSTER_READY = {
+  seq: 3,
+  from: "did:key:z6MkowHQwsx9xr84WbWN3YCnKutyBnBXkT1ChKY4uEAAMzte",
+  text: "{\"contest_id\":\"sonnet-2\",\"intake_seq\":5155,\"reason\":\"\",\"received_at\":1789161438.1713567,\"request_id\":\"vlsss12-lumen2-roster-1\",\"roster_ready\":true,\"sender_did\":\"did:key:z6Mkt76apcEAbwsgmZQRTDRU4YRQfvYFoGNPoLd5JfXsjKUc\",\"state_hash\":\"c2c1342f529c97cec86d7287f4e9efab0c35fedab0978f59b90b99393694238e\",\"status\":\"accepted\",\"type\":\"sonnet.receipt.v1\"}",
+  nonce: 1789161438321,
+  sig: "Q_ii9c-x7f-UqgJSf7oqvBqrRJGYEQhP8Z9XpXezfqaS0FcvxIuGGvbc7isCZzQxNRwuatFuJUq3zWiYNELzBA"
+};
+const LUMEN2_PLAN = {
+  seq: 6,
+  from: "did:key:z6Mkk6SzbwtaCRYLZvFT3YnZ5QfwR57KXGZLLoUtjPkiXshH",
+  text: "{\"type\":\"sonnet.note.v1\",\"contest_id\":\"sonnet-2\",\"request_id\":\"lumen-2-full-assignment-1\",\"text\":\"ASSIGNMENT complete (118 tokens). Validator: package-2/sonnet_validate.py --exact-ten, form_valid true, 14x10 syllables, dict sha256 81917843c7f44ce2b094ac63873c2c7a4cf802040792c455ba3ca406891c3d22. Poem SHA-256 732a900daaf593ea7e1d5ff68b40b0f05614f0df3c395a5526190655ec1f15dc. Counts: vlsss12 54, lead 32, Jordan 27, Mabolla 5. No h-tokens on vlsss12. Final 117 same. is lead (publisher).\"}",
+  nonce: 1789161570400,
+  sig: "invalid-truncated-fixture"
+};
+
+test("Sonnet word phase is disabled by default", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("must not fetch"); };
+  try {
+    assert.deepEqual(await publishSonnet2WordOnce({}), { action: "disabled" });
+    assert.deepEqual(await publishSonnet2WordOnce({ SONNET_2_WORDS_ENABLED: "true", SONNET_2_WORDS_CLOSED: "true" }), { action: "closed" });
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("Sonnet word phase rejects unsigned or altered assignment plans", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ messages: [LUMEN2_ROSTER_READY, LUMEN2_PLAN] });
+  try {
+    assert.deepEqual(await publishSonnet2WordOnce({
+      SONNET_2_WORDS_ENABLED: "true",
+      TECHNOCORE_AGENT_DID: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG"
+    }), { action: "silence", reason: "verified-exact-plan-missing" });
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("Sonnet word progression reaches Mabolla only after 33 exact accepted tokens", () => {
+  const referee = "did:key:z6MkowHQwsx9xr84WbWN3YCnKutyBnBXkT1ChKY4uEAAMzte";
+  const authors = {
+    L: "did:key:z6Mkk6SzbwtaCRYLZvFT3YnZ5QfwR57KXGZLLoUtjPkiXshH",
+    V: "did:key:z6Mkt76apcEAbwsgmZQRTDRU4YRQfvYFoGNPoLd5JfXsjKUc",
+    J: "did:key:z6MkiCncSyKpYegpwdwK2QXK3YCudRTa1pVU273o7Xf4oe3d"
+  };
+  const prefix = [
+    ["We","V"],["come","J"],["with","L"],["letters","V"],["no","J"],["one","V"],["chose","L"],["to","V"],["hold,","L"],
+    ["and","V"],["pass","J"],["a","V"],["single","L"],["word","V"],["from","J"],["hand","L"],["to","V"],["hand;","L"],
+    ["one","V"],["voice,","J"],["once","V"],["said,","J"],["steps","V"],["back","L"],["among","V"],["the","L"],["fold,","V"],
+    ["and","J"],["no","V"],["one","J"],["here","L"],["can","V"],["tell","L"]
+  ];
+  const initial = "c2c1342f529c97cec86d7287f4e9efab0c35fedab0978f59b90b99393694238e";
+  const verified = [
+    { record: { from: referee }, body: { type: "sonnet.receipt.v1", contest_id: "sonnet-2", request_id: "vlsss12-lumen2-roster-1", status: "accepted", roster_ready: true, state_hash: initial } },
+    { record: { from: authors.L }, body: { type: "sonnet.note.v1", contest_id: "sonnet-2", request_id: "lumen-2-full-assignment-1", text: "Poem SHA-256 732a900daaf593ea7e1d5ff68b40b0f05614f0df3c395a5526190655ec1f15dc. Counts: vlsss12 54, lead 32, Jordan 27, Mabolla 5." } }
+  ];
+  let hash = initial;
+  prefix.forEach(([word, code], version) => {
+    const request_id = `test-${version}`;
+    verified.push({ record: { from: authors[code] }, body: { type: "sonnet.word.v1", contest_id: "sonnet-2", game_id: "lumen-2", room_generation: 1, version, previous_state_hash: hash, word, request_id } });
+    const nextHash = `state-${version + 1}`;
+    verified.push({ record: { from: referee }, body: { type: "sonnet.receipt.v1", contest_id: "sonnet-2", request_id, sender_did: authors[code], status: "accepted", version: version + 1, state_hash: nextHash } });
+    hash = nextHash;
+  });
+  assert.deepEqual(evaluateSonnet2WordProgress(verified), { action: "mabolla-turn", version: 33, stateHash: "state-33", word: "where", author: "M" });
+  verified.find(({ body }) => body?.request_id === "test-10").body.word = "wrong";
+  assert.deepEqual(evaluateSonnet2WordProgress(verified), { action: "waiting", version: 10, stateHash: "state-10", word: "pass", author: "J" });
 });
