@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildProbeContext,
   decideWithModel,
+  hasSonnetRecruitment,
   isLowInformationContext,
   listenForProbeWindow,
   mergeRoomHistory,
@@ -11,10 +12,30 @@ import {
   parseProbeReply,
   probeAgeMs,
   publishReply,
+  publishSonnetRecruitmentOnce,
   scanOnce,
   validateProbeDecision,
   verifySignedRecord
 } from "../src/probe-worker.mjs";
+
+test("detects only this agent's exact sonnet recruitment request", () => {
+  const request = '{"request_id":"mabolla-apply-whale-1"}';
+  assert.equal(hasSonnetRecruitment([{ from: "did:key:other", text: request }]), false);
+  assert.equal(hasSonnetRecruitment([{
+    from: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG",
+    text: request
+  }]), true);
+});
+
+test("sonnet recruitment is disabled by default and performs no network work", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("unexpected fetch"); };
+  try {
+    assert.deepEqual(await publishSonnetRecruitmentOnce({}), { action: "disabled" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 function base58Encode(bytes) {
   const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
