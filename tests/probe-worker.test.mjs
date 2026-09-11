@@ -102,6 +102,24 @@ test("sonnet recruitment is disabled by default and performs no network work", a
   }
 });
 
+test("closed sonnet recruitment cannot restart when room history rotates", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("unexpected fetch"); };
+  const env = {
+    SONNET_RECRUITMENT_ENABLED: "true",
+    SONNET_RECRUITMENT_CLOSED: "true"
+  };
+  try {
+    assert.deepEqual(await publishSonnetRecruitmentOnce(env), { action: "closed" });
+    assert.deepEqual(await publishLumenRecruitmentOnce(env), { action: "closed" });
+    assert.deepEqual(await publishOpenInviteOnce(env), { action: "closed" });
+    assert.deepEqual(await publishSonnetPrepNoteOnce(env), { action: "closed" });
+    assert.deepEqual(await publishLumenConfirmationOnce(env), { action: "closed" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function base58Encode(bytes) {
   const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
   const digits = [0];
