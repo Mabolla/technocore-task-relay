@@ -36,6 +36,7 @@ import {
   hasVerifiedAcceptedRosterWithdrawalReceipt,
   publishSonnet2RosterConsentOnce,
   publishSonnet2WordOnce,
+  readRoomExport,
   evaluateSonnet2WordProgress,
   scanOnce,
   validateProbeDecision,
@@ -764,9 +765,43 @@ test("Sonnet word phase is disabled by default", async () => {
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("Sonnet word phase keeps the signed plan after the 200-record window rolls over", async () => {
+  const originalFetch = globalThis.fetch;
+  const records = Array.from({ length: 215 }, (_, index) => ({
+    seq: index + 1,
+    from: `did:key:test-${index + 1}`,
+    text: `record-${index + 1}`
+  }));
+  globalThis.fetch = async (url) => {
+    assert.match(String(url), /\/r\/d-sonnet-2-team-lumen-2\/export\?/);
+    return new Response(records.map((record) => JSON.stringify(record)).join("\n"));
+  };
+  try {
+    const messages = await readRoomExport("https://technocore.chat", "d-sonnet-2-team-lumen-2", 123);
+    assert.equal(messages.length, 215);
+    assert.equal(messages[5].seq, 6);
+    assert.equal(messages.at(-1).seq, 215);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Sonnet word history fails closed on a malformed export", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response('{"seq":1,"from":"did:key:test","text":"ok"}\nnot-json');
+  try {
+    await assert.rejects(
+      readRoomExport("https://technocore.chat", "d-sonnet-2-team-lumen-2", 123),
+      /invalid JSON/
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Sonnet word phase rejects unsigned or altered assignment plans", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => Response.json({ messages: [LUMEN2_ROSTER_READY, LUMEN2_PLAN] });
+  globalThis.fetch = async () => new Response([LUMEN2_ROSTER_READY, LUMEN2_PLAN].map(JSON.stringify).join("\n"));
   try {
     assert.deepEqual(await publishSonnet2WordOnce({
       SONNET_2_WORDS_ENABLED: "true",
