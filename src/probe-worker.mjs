@@ -733,8 +733,7 @@ export async function publishSonnet2WordOnce(env, now = Date.now()) {
   if (state !== "enabled") return { action: state };
   if (env.TECHNOCORE_AGENT_DID !== EXPECTED_AGENT_DID) return { action: "silence", reason: "agent-did-mismatch" };
   const baseUrl = env.TECHNOCORE_URL || DEFAULT_BASE_URL;
-  const payload = await readJson(`${baseUrl}/r/${SONNET_2_LUMEN_ROOM}?limit=200&format=json&n=${now}`);
-  const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+  const messages = await readRoomExport(baseUrl, SONNET_2_LUMEN_ROOM, now);
   const verified = [];
   for (const record of messages) {
     if (!Object.values(SONNET_2_LUMEN_AUTHORS).includes(record?.from) && record?.from !== SONNET_2_REFEREE_DID) continue;
@@ -885,6 +884,25 @@ async function readJson(url) {
   const response = await fetch(url, { headers: { accept: "application/json" } });
   if (!response.ok) throw new Error(`Technocore read failed: ${response.status}`);
   return response.json();
+}
+
+export async function readRoomExport(baseUrl, room, now = Date.now()) {
+  const response = await fetch(`${baseUrl}/r/${encodeURIComponent(room)}/export?n=${now}`, {
+    headers: { accept: "application/x-ndjson" }
+  });
+  if (!response.ok) throw new Error(`Technocore read failed: ${response.status}`);
+  const text = await response.text();
+  if (text.length > 2_000_000) throw new Error("Technocore room export exceeds safe size");
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length > 2_000) throw new Error("Technocore room export exceeds safe record count");
+  return lines.map((line) => {
+    let record;
+    try { record = JSON.parse(line); } catch { throw new Error("Technocore room export contains invalid JSON"); }
+    if (!Number.isSafeInteger(record?.seq) || typeof record?.from !== "string" || typeof record?.text !== "string") {
+      throw new Error("Technocore room export contains an invalid record");
+    }
+    return record;
+  });
 }
 
 function roomReadUrl(baseUrl, room, now, since) {
