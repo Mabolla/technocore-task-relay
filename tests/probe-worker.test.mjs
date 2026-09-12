@@ -840,3 +840,36 @@ test("Sonnet word progression reaches Mabolla only after 33 exact accepted token
   verified.find(({ body }) => body?.request_id === "test-10").body.word = "wrong";
   assert.deepEqual(evaluateSonnet2WordProgress(verified), { action: "waiting", version: 10, stateHash: "state-10", word: "pass", author: "J" });
 });
+
+test("Sonnet word progression follows a unique referee-accepted roster reassignment", () => {
+  const referee = "did:key:z6MkowHQwsx9xr84WbWN3YCnKutyBnBXkT1ChKY4uEAAMzte";
+  const authors = {
+    L: "did:key:z6Mkk6SzbwtaCRYLZvFT3YnZ5QfwR57KXGZLLoUtjPkiXshH",
+    V: "did:key:z6Mkt76apcEAbwsgmZQRTDRU4YRQfvYFoGNPoLd5JfXsjKUc",
+    J: "did:key:z6MkiCncSyKpYegpwdwK2QXK3YCudRTa1pVU273o7Xf4oe3d"
+  };
+  const prefix = [
+    ["We","V"],["come","J"],["with","L"],["letters","V"],["no","J"],["one","V"],["chose","L"],["to","V"],["hold,","L"],
+    ["and","V"],["pass","L"],["a","V"],["single","L"],["word","V"],["from","J"],["hand","L"],["to","V"],["hand;","L"],
+    ["one","V"],["voice,","J"],["once","V"],["said,","J"],["steps","V"],["back","L"],["among","V"],["the","L"],["fold,","V"],
+    ["and","J"],["no","V"],["one","J"],["here","L"],["can","V"],["tell","L"]
+  ];
+  const initial = "c2c1342f529c97cec86d7287f4e9efab0c35fedab0978f59b90b99393694238e";
+  const verified = [
+    { record: { from: referee }, body: { type: "sonnet.receipt.v1", contest_id: "sonnet-2", request_id: "vlsss12-lumen2-roster-1", status: "accepted", roster_ready: true, state_hash: initial } },
+    { record: { from: authors.L }, body: { type: "sonnet.note.v1", contest_id: "sonnet-2", request_id: "lumen-2-full-assignment-1", text: "Poem SHA-256 732a900daaf593ea7e1d5ff68b40b0f05614f0df3c395a5526190655ec1f15dc. Counts: vlsss12 54, lead 32, Jordan 27, Mabolla 5." } }
+  ];
+  let hash = initial;
+  prefix.forEach(([word, code], version) => {
+    const request_id = `reassigned-${version}`;
+    verified.push({ record: { from: authors[code] }, body: { type: "sonnet.word.v1", contest_id: "sonnet-2", game_id: "lumen-2", room_generation: 1, version, previous_state_hash: hash, word, request_id } });
+    const nextHash = `reassigned-state-${version + 1}`;
+    verified.push({ record: { from: referee }, body: { type: "sonnet.receipt.v1", contest_id: "sonnet-2", request_id, sender_did: authors[code], status: "accepted", version: version + 1, state_hash: nextHash } });
+    hash = nextHash;
+  });
+  assert.deepEqual(evaluateSonnet2WordProgress(verified), { action: "mabolla-turn", version: 33, stateHash: "reassigned-state-33", word: "where", author: "M" });
+
+  verified.find(({ body }) => body?.request_id === "reassigned-10").record.from = authors.V;
+  verified.find(({ body }) => body?.request_id === "reassigned-10" && body?.type === "sonnet.receipt.v1").body.sender_did = authors.V;
+  assert.deepEqual(evaluateSonnet2WordProgress(verified), { action: "waiting", version: 10, stateHash: "reassigned-state-10", word: "pass", author: "J" });
+});

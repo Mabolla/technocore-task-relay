@@ -676,7 +676,11 @@ async function verifiedSonnet2Body(record, expectedDid) {
 }
 
 function mabollaCanWriteSonnetToken(token) {
-  const allowed = new Set("bcdefghijklmopqrsvwyz");
+  return didCanWriteSonnetToken(EXPECTED_AGENT_DID, token);
+}
+
+function didCanWriteSonnetToken(did, token) {
+  const allowed = new Set(String(did).toLowerCase().match(/[a-z]/g) || []);
   return [...String(token).toLowerCase()].every((character) => !/[a-z]/.test(character) || allowed.has(character));
 }
 
@@ -699,32 +703,46 @@ export function evaluateSonnet2WordProgress(verified) {
 
   let version = 0;
   let stateHash = SONNET_2_LUMEN_INITIAL_STATE_HASH;
+  let previousAuthorDid = null;
   while (version < SONNET_2_LUMEN_WORD_PLAN.length) {
-    const [word, authorCode] = SONNET_2_LUMEN_WORD_PLAN[version];
-    const authorDid = SONNET_2_LUMEN_AUTHORS[authorCode];
-    const proposal = verified.find(({ record, body }) => record.from === authorDid
-      && body?.type === "sonnet.word.v1"
-      && body?.contest_id === "sonnet-2"
-      && body?.game_id === "lumen-2"
-      && body?.room_generation === 1
-      && body?.version === version
-      && body?.previous_state_hash === stateHash
-      && body?.word === word);
-    if (!proposal) break;
-    const accepted = verified.find(({ record, body }) => record.from === SONNET_2_REFEREE_DID
-      && body?.type === "sonnet.receipt.v1"
-      && body?.contest_id === "sonnet-2"
-      && body?.request_id === proposal.body.request_id
-      && body?.sender_did === authorDid
-      && body?.status === "accepted"
-      && body?.version === version + 1
-      && typeof body?.state_hash === "string");
-    if (!accepted) break;
+    const [word] = SONNET_2_LUMEN_WORD_PLAN[version];
+    const acceptedProposals = verified.flatMap(({ record, body }) => {
+      const authorDid = record.from;
+      if (!SONNET_2_LUMEN_MEMBERS.includes(authorDid)
+        || authorDid === previousAuthorDid
+        || !didCanWriteSonnetToken(authorDid, word)
+        || body?.type !== "sonnet.word.v1"
+        || body?.contest_id !== "sonnet-2"
+        || body?.game_id !== "lumen-2"
+        || body?.room_generation !== 1
+        || body?.version !== version
+        || body?.previous_state_hash !== stateHash
+        || body?.word !== word) return [];
+      const accepted = verified.find(({ record: receiptRecord, body: receipt }) => receiptRecord.from === SONNET_2_REFEREE_DID
+        && receipt?.type === "sonnet.receipt.v1"
+        && receipt?.contest_id === "sonnet-2"
+        && receipt?.request_id === body.request_id
+        && receipt?.sender_did === authorDid
+        && receipt?.status === "accepted"
+        && receipt?.version === version + 1
+        && typeof receipt?.state_hash === "string");
+      return accepted ? [{ authorDid, requestId: body.request_id, accepted }] : [];
+    });
+    const canonical = new Map(acceptedProposals.map((candidate) => [
+      `${candidate.authorDid}\0${candidate.requestId}\0${candidate.accepted.body.state_hash}`,
+      candidate
+    ]));
+    if (canonical.size !== 1) break;
+    const [{ authorDid, accepted }] = canonical.values();
+    previousAuthorDid = authorDid;
     version += 1;
     stateHash = accepted.body.state_hash;
   }
   if (version >= SONNET_2_LUMEN_WORD_PLAN.length) return { action: "complete", version, stateHash };
   const [word, authorCode] = SONNET_2_LUMEN_WORD_PLAN[version];
+  if (authorCode === "M" && previousAuthorDid === EXPECTED_AGENT_DID) {
+    return { action: "silence", reason: "consecutive-author", version, stateHash, word, author: authorCode };
+  }
   return { action: authorCode === "M" ? "mabolla-turn" : "waiting", version, stateHash, word, author: authorCode };
 }
 
