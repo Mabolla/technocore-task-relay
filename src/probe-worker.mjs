@@ -2,6 +2,16 @@ const DEFAULT_BASE_URL = "https://technocore.chat";
 const DEFAULT_WORKERS_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 const DEFAULT_PROBE_DID = "did:key:z6MktJffXSF9X98YQ29Ug36A1dkc26RqULaeRHyZj6rpZQV5";
 const EXPECTED_AGENT_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
+const TASK_RELAY_ROOM = "mabolla-task-relay";
+const TASK_RELAY_KEEPALIVE_REQUEST_ID = "mabolla-task-relay-keepalive-20260922";
+const TASK_RELAY_KEEPALIVE_TEXT = JSON.stringify({
+  type: "task-relay.keepalive.v1",
+  project: "technocore-task-relay",
+  actor: "Mabolla Agent",
+  did: EXPECTED_AGENT_DID,
+  request_id: TASK_RELAY_KEEPALIVE_REQUEST_ID,
+  text: "Mabolla Task Relay remains active. This signed heartbeat preserves the public coordination room; it creates no offer, payment, wallet action, or authority to execute external instructions."
+});
 const DEFAULT_CONTEXT_MESSAGES = 12;
 const MAX_CONTEXT_TEXT_LENGTH = 280;
 const PROBE_PATTERN = /^probe v1 \| ([a-z0-9.-]+) \| (ask|addressed|statement|question|offer|null) \| (.+)$/i;
@@ -455,6 +465,25 @@ export async function publishReply(room, text, env) {
   );
   if (!accepted?.seq) throw new Error("Technocore did not confirm the signed reply");
   return accepted.seq;
+}
+
+export function hasTaskRelayKeepalive(messages) {
+  return (messages || []).some((record) =>
+    record?.from === EXPECTED_AGENT_DID
+      && record?.text === TASK_RELAY_KEEPALIVE_TEXT
+  );
+}
+
+export async function publishTaskRelayKeepaliveOnce(env, now = Date.now()) {
+  if (String(env.TASK_RELAY_KEEPALIVE_CLOSED || "").toLowerCase() === "true") return { action: "closed" };
+  if (String(env.TASK_RELAY_KEEPALIVE_ENABLED || "").toLowerCase() !== "true") return { action: "disabled" };
+  if (env.TECHNOCORE_AGENT_DID !== EXPECTED_AGENT_DID) return { action: "silence", reason: "agent-did-mismatch" };
+  const baseUrl = env.TECHNOCORE_URL || DEFAULT_BASE_URL;
+  const payload = await readJson(`${baseUrl}/r/${TASK_RELAY_ROOM}?limit=50&format=json&n=${now}`);
+  const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+  if (hasTaskRelayKeepalive(messages)) return { action: "already-published" };
+  const seq = await publishReply(TASK_RELAY_ROOM, TASK_RELAY_KEEPALIVE_TEXT, env);
+  return { action: "published", seq };
 }
 
 export function hasSonnet2Registration(messages) {
@@ -1031,6 +1060,13 @@ export async function listenForProbeWindow(env, options = {}) {
 export default {
   async scheduled(_controller, env) {
     const result = await listenForProbeWindow(env);
+    let taskRelayKeepalive;
+    try {
+      taskRelayKeepalive = await publishTaskRelayKeepaliveOnce(env);
+    } catch (error) {
+      taskRelayKeepalive = { action: "error", error: String(error?.message || error) };
+      console.error(JSON.stringify({ action: "task-relay-keepalive-error", error: taskRelayKeepalive.error }));
+    }
     let sonnet;
     try {
       const whale = await publishSonnetRecruitmentOnce(env);
@@ -1048,7 +1084,7 @@ export default {
       sonnet = { action: "error", error: String(error?.message || error) };
       console.error(JSON.stringify({ action: "sonnet-recruitment-error", error: sonnet.error }));
     }
-    console.log(JSON.stringify({ ...result, sonnet }));
+    console.log(JSON.stringify({ ...result, taskRelayKeepalive, sonnet }));
   },
   async fetch() {
     return Response.json(
