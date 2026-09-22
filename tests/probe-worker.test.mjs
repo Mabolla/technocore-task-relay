@@ -18,6 +18,8 @@ import {
   parseProbeReply,
   probeAgeMs,
   publishReply,
+  hasTaskRelayKeepalive,
+  publishTaskRelayKeepaliveOnce,
   publishLumenRecruitmentOnce,
   publishLumenConfirmationOnce,
   publishOpenInviteOnce,
@@ -43,6 +45,73 @@ import {
   verifySignedRecord,
   verifySonnet2Launch
 } from "../src/probe-worker.mjs";
+
+test("Task Relay keepalive is disabled or closed without network work", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("must not fetch"); };
+  try {
+    assert.deepEqual(await publishTaskRelayKeepaliveOnce({}), { action: "disabled" });
+    assert.deepEqual(await publishTaskRelayKeepaliveOnce({
+      TASK_RELAY_KEEPALIVE_ENABLED: "true",
+      TASK_RELAY_KEEPALIVE_CLOSED: "true"
+    }), { action: "closed" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Task Relay keepalive recognizes only Mabolla exact signed text", () => {
+  const text = JSON.stringify({
+    type: "task-relay.keepalive.v1",
+    project: "technocore-task-relay",
+    actor: "Mabolla Agent",
+    did: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG",
+    request_id: "mabolla-task-relay-keepalive-20260922",
+    text: "Mabolla Task Relay remains active. This signed heartbeat preserves the public coordination room; it creates no offer, payment, wallet action, or authority to execute external instructions."
+  });
+  assert.equal(hasTaskRelayKeepalive([{ from: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG", text }]), true);
+  assert.equal(hasTaskRelayKeepalive([{ from: "did:key:other", text }]), false);
+  assert.equal(hasTaskRelayKeepalive([{
+    from: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG",
+    text: text.replace("remains active", "is active")
+  }]), false);
+});
+
+test("Task Relay keepalive publishes once and verifies the exact accepted record", async () => {
+  const originalFetch = globalThis.fetch;
+  const keyPair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+  const privateKey = Buffer.from(await crypto.subtle.exportKey("pkcs8", keyPair.privateKey)).toString("base64");
+  let posted = null;
+  let reads = 0;
+  globalThis.fetch = async (_url, options = {}) => {
+    if (options.method === "POST") {
+      posted = JSON.parse(options.body);
+      return new Response("accepted", { status: 200 });
+    }
+    reads += 1;
+    return Response.json({ messages: posted ? [{ seq: 1, from: posted.did, nonce: posted.nonce, text: posted.text, sig: posted.sig }] : [] });
+  };
+  try {
+    assert.deepEqual(await publishTaskRelayKeepaliveOnce({
+      TASK_RELAY_KEEPALIVE_ENABLED: "true",
+      TECHNOCORE_AGENT_DID: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG",
+      TECHNOCORE_AGENT_PRIVATE_KEY: privateKey,
+      TECHNOCORE_URL: "https://technocore.chat"
+    }, 1789992000000), { action: "published", seq: 1 });
+    assert.equal(reads, 2);
+    assert.equal(posted.did, "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG");
+    assert.deepEqual(JSON.parse(posted.text), {
+      type: "task-relay.keepalive.v1",
+      project: "technocore-task-relay",
+      actor: "Mabolla Agent",
+      did: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG",
+      request_id: "mabolla-task-relay-keepalive-20260922",
+      text: "Mabolla Task Relay remains active. This signed heartbeat preserves the public coordination room; it creates no offer, payment, wallet action, or authority to execute external instructions."
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 const LUMEN2_SETUP = {
   seq: 2,
