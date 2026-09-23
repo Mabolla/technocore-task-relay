@@ -3,15 +3,7 @@ const DEFAULT_WORKERS_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 const DEFAULT_PROBE_DID = "did:key:z6MktJffXSF9X98YQ29Ug36A1dkc26RqULaeRHyZj6rpZQV5";
 const EXPECTED_AGENT_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 const TASK_RELAY_ROOM = "mabolla-task-relay";
-const TASK_RELAY_KEEPALIVE_REQUEST_ID = "mabolla-task-relay-keepalive-20260922";
-const TASK_RELAY_KEEPALIVE_TEXT = JSON.stringify({
-  type: "task-relay.keepalive.v1",
-  project: "technocore-task-relay",
-  actor: "Mabolla Agent",
-  did: EXPECTED_AGENT_DID,
-  request_id: TASK_RELAY_KEEPALIVE_REQUEST_ID,
-  text: "Mabolla Task Relay remains active. This signed heartbeat preserves the public coordination room; it creates no offer, payment, wallet action, or authority to execute external instructions."
-});
+const TASK_RELAY_KEEPALIVE_AFTER_MS = 5.5 * 24 * 60 * 60 * 1000;
 const DEFAULT_CONTEXT_MESSAGES = 12;
 const MAX_CONTEXT_TEXT_LENGTH = 280;
 const PROBE_PATTERN = /^probe v1 \| ([a-z0-9.-]+) \| (ask|addressed|statement|question|offer|null) \| (.+)$/i;
@@ -467,10 +459,41 @@ export async function publishReply(room, text, env) {
   return accepted.seq;
 }
 
-export function hasTaskRelayKeepalive(messages) {
+function recordTimestampMs(record) {
+  const raw = record?.ts ?? record?.at ?? record?.timestamp;
+  if (raw === undefined || raw === null) return Number.NaN;
+  const numeric = Number(raw);
+  return Number.isFinite(numeric)
+    ? (numeric < 10_000_000_000 ? numeric * 1000 : numeric)
+    : Date.parse(String(raw));
+}
+
+export function buildTaskRelayKeepalive(lastWrite, now = Date.now()) {
+  const lastTimestamp = lastWrite ? recordTimestampMs(lastWrite) : Number.NaN;
+  const lastSequence = Number(lastWrite?.seq);
+  const hasLastWrite = Number.isFinite(lastTimestamp) && Number.isSafeInteger(lastSequence);
+  const requestId = hasLastWrite
+    ? `mabolla-task-relay-keepalive-after-${lastSequence}-${Math.trunc(lastTimestamp)}`
+    : `mabolla-task-relay-keepalive-create-${new Date(now).toISOString().slice(0, 10)}`;
+  const payload = {
+    type: "task-relay.keepalive.v1",
+    project: "technocore-task-relay",
+    actor: "Mabolla Agent",
+    did: EXPECTED_AGENT_DID,
+    request_id: requestId,
+    text: "Mabolla Task Relay remains active. This signed heartbeat preserves the public coordination room; it creates no offer, payment, wallet action, or authority to execute external instructions."
+  };
+  if (hasLastWrite) {
+    payload.observed_last_seq = lastSequence;
+    payload.observed_last_write_at = new Date(lastTimestamp).toISOString();
+  }
+  return JSON.stringify(payload);
+}
+
+export function hasTaskRelayKeepalive(messages, expectedText) {
   return (messages || []).some((record) =>
     record?.from === EXPECTED_AGENT_DID
-      && record?.text === TASK_RELAY_KEEPALIVE_TEXT
+      && record?.text === expectedText
   );
 }
 
@@ -481,9 +504,31 @@ export async function publishTaskRelayKeepaliveOnce(env, now = Date.now()) {
   const baseUrl = env.TECHNOCORE_URL || DEFAULT_BASE_URL;
   const payload = await readJson(`${baseUrl}/r/${TASK_RELAY_ROOM}?limit=50&format=json&n=${now}`);
   const messages = Array.isArray(payload?.messages) ? payload.messages : [];
-  if (hasTaskRelayKeepalive(messages)) return { action: "already-published" };
-  const seq = await publishReply(TASK_RELAY_ROOM, TASK_RELAY_KEEPALIVE_TEXT, env);
-  return { action: "published", seq };
+  const writes = messages
+    .map((record) => ({ record, timestamp: recordTimestampMs(record) }))
+    .filter(({ timestamp }) => Number.isFinite(timestamp))
+    .sort((left, right) => right.timestamp - left.timestamp);
+  if (messages.length && !writes.length) return { action: "silence", reason: "invalid-room-history" };
+
+  const latest = writes[0];
+  if (latest) {
+    const age = Math.max(0, now - latest.timestamp);
+    if (age < TASK_RELAY_KEEPALIVE_AFTER_MS) {
+      return {
+        action: "fresh",
+        lastWriteAt: new Date(latest.timestamp).toISOString(),
+        nextDueAt: new Date(latest.timestamp + TASK_RELAY_KEEPALIVE_AFTER_MS).toISOString()
+      };
+    }
+    if (!Number.isSafeInteger(Number(latest.record?.seq))) {
+      return { action: "silence", reason: "invalid-room-history" };
+    }
+  }
+
+  const text = buildTaskRelayKeepalive(latest?.record, now);
+  if (hasTaskRelayKeepalive(messages, text)) return { action: "already-published" };
+  const seq = await publishReply(TASK_RELAY_ROOM, text, env);
+  return { action: "published", seq, previousLastSeq: latest ? Number(latest.record.seq) : null };
 }
 
 export function hasSonnet2Registration(messages) {
