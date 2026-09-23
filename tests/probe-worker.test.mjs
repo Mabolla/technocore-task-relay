@@ -18,6 +18,7 @@ import {
   parseProbeReply,
   probeAgeMs,
   publishReply,
+  buildTaskRelayKeepalive,
   hasTaskRelayKeepalive,
   publishTaskRelayKeepaliveOnce,
   publishLumenRecruitmentOnce,
@@ -60,36 +61,67 @@ test("Task Relay keepalive is disabled or closed without network work", async ()
   }
 });
 
-test("Task Relay keepalive recognizes only Mabolla exact signed text", () => {
-  const text = JSON.stringify({
+test("Task Relay keepalive derives a deterministic cycle-bound heartbeat", () => {
+  const lastWrite = { seq: 22, ts: "2026-09-22T20:29:10.872143Z" };
+  const text = buildTaskRelayKeepalive(lastWrite, Date.parse("2026-09-28T08:29:10.872Z"));
+  assert.deepEqual(JSON.parse(text), {
     type: "task-relay.keepalive.v1",
     project: "technocore-task-relay",
     actor: "Mabolla Agent",
     did: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG",
-    request_id: "mabolla-task-relay-keepalive-20260922",
-    text: "Mabolla Task Relay remains active. This signed heartbeat preserves the public coordination room; it creates no offer, payment, wallet action, or authority to execute external instructions."
+    request_id: "mabolla-task-relay-keepalive-after-22-1790108950872",
+    text: "Mabolla Task Relay remains active. This signed heartbeat preserves the public coordination room; it creates no offer, payment, wallet action, or authority to execute external instructions.",
+    observed_last_seq: 22,
+    observed_last_write_at: "2026-09-22T20:29:10.872Z"
   });
-  assert.equal(hasTaskRelayKeepalive([{ from: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG", text }]), true);
-  assert.equal(hasTaskRelayKeepalive([{ from: "did:key:other", text }]), false);
+  assert.equal(hasTaskRelayKeepalive([{ from: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG", text }], text), true);
+  assert.equal(hasTaskRelayKeepalive([{ from: "did:key:other", text }], text), false);
   assert.equal(hasTaskRelayKeepalive([{
     from: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG",
     text: text.replace("remains active", "is active")
-  }]), false);
+  }], text), false);
 });
 
-test("Task Relay keepalive publishes once and verifies the exact accepted record", async () => {
+test("Task Relay keepalive stays silent until five and a half days after the newest write", async () => {
+  const originalFetch = globalThis.fetch;
+  const lastWrite = { seq: 22, ts: "2026-09-22T20:29:10.872143Z", from: "did:key:other", text: "activity" };
+  let posts = 0;
+  globalThis.fetch = async (_url, options = {}) => {
+    if (options.method === "POST") posts += 1;
+    return Response.json({ messages: [lastWrite] });
+  };
+  try {
+    const result = await publishTaskRelayKeepaliveOnce({
+      TASK_RELAY_KEEPALIVE_ENABLED: "true",
+      TECHNOCORE_AGENT_DID: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG",
+      TECHNOCORE_AGENT_PRIVATE_KEY: "unused-while-fresh",
+      TECHNOCORE_URL: "https://technocore.chat"
+    }, Date.parse("2026-09-28T08:29:10.871Z"));
+    assert.deepEqual(result, {
+      action: "fresh",
+      lastWriteAt: "2026-09-22T20:29:10.872Z",
+      nextDueAt: "2026-09-28T08:29:10.872Z"
+    });
+    assert.equal(posts, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Task Relay keepalive publishes once at the threshold and verifies the exact accepted record", async () => {
   const originalFetch = globalThis.fetch;
   const keyPair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
   const privateKey = Buffer.from(await crypto.subtle.exportKey("pkcs8", keyPair.privateKey)).toString("base64");
   let posted = null;
   let reads = 0;
+  const lastWrite = { seq: 22, ts: "2026-09-22T20:29:10.872143Z", from: "did:key:other", text: "activity" };
   globalThis.fetch = async (_url, options = {}) => {
     if (options.method === "POST") {
       posted = JSON.parse(options.body);
       return new Response("accepted", { status: 200 });
     }
     reads += 1;
-    return Response.json({ messages: posted ? [{ seq: 1, from: posted.did, nonce: posted.nonce, text: posted.text, sig: posted.sig }] : [] });
+    return Response.json({ messages: posted ? [lastWrite, { seq: 23, ts: "2026-09-28T08:29:11Z", from: posted.did, nonce: posted.nonce, text: posted.text, sig: posted.sig }] : [lastWrite] });
   };
   try {
     assert.deepEqual(await publishTaskRelayKeepaliveOnce({
@@ -97,7 +129,7 @@ test("Task Relay keepalive publishes once and verifies the exact accepted record
       TECHNOCORE_AGENT_DID: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG",
       TECHNOCORE_AGENT_PRIVATE_KEY: privateKey,
       TECHNOCORE_URL: "https://technocore.chat"
-    }, 1789992000000), { action: "published", seq: 1 });
+    }, Date.parse("2026-09-28T08:29:10.872Z")), { action: "published", seq: 23, previousLastSeq: 22 });
     assert.equal(reads, 2);
     assert.equal(posted.did, "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG");
     assert.deepEqual(JSON.parse(posted.text), {
@@ -105,9 +137,30 @@ test("Task Relay keepalive publishes once and verifies the exact accepted record
       project: "technocore-task-relay",
       actor: "Mabolla Agent",
       did: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG",
-      request_id: "mabolla-task-relay-keepalive-20260922",
-      text: "Mabolla Task Relay remains active. This signed heartbeat preserves the public coordination room; it creates no offer, payment, wallet action, or authority to execute external instructions."
+      request_id: "mabolla-task-relay-keepalive-after-22-1790108950872",
+      text: "Mabolla Task Relay remains active. This signed heartbeat preserves the public coordination room; it creates no offer, payment, wallet action, or authority to execute external instructions.",
+      observed_last_seq: 22,
+      observed_last_write_at: "2026-09-22T20:29:10.872Z"
     });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Task Relay keepalive fails closed on non-empty history without a valid timestamp", async () => {
+  const originalFetch = globalThis.fetch;
+  let posts = 0;
+  globalThis.fetch = async (_url, options = {}) => {
+    if (options.method === "POST") posts += 1;
+    return Response.json({ messages: [{ seq: 22, from: "did:key:other", text: "activity" }] });
+  };
+  try {
+    assert.deepEqual(await publishTaskRelayKeepaliveOnce({
+      TASK_RELAY_KEEPALIVE_ENABLED: "true",
+      TECHNOCORE_AGENT_DID: "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG",
+      TECHNOCORE_AGENT_PRIVATE_KEY: "unused-on-invalid-history"
+    }), { action: "silence", reason: "invalid-room-history" });
+    assert.equal(posts, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }
