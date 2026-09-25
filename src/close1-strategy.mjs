@@ -7,6 +7,7 @@ export const CLOSE1_FINAL_AT = "2026-10-04T10:00:00.000Z";
 export const CLOSE1_STARTING_BALANCE = 10_000;
 export const CLOSE1_FEE_RATE = 0.01;
 export const CLOSE1_MAX_ALLOCATION = 0.5;
+export const CLOSE1_TIME_BOXED_ENTRY_HOURS = 192;
 
 const MIN_CANDLE_HISTORY = 700;
 const RELATIVE_LOOKBACK_HOURS = 168;
@@ -179,15 +180,17 @@ export function analyzeClose1Market(nvdaCandles, benchmarkCandles, snapshot, now
   if (remainingHours < MIN_ENTRY_HOURS || remainingHours > MAX_ENTRY_HOURS) {
     return { action: "hold", reason: "outside-validated-entry-window", sweep: snapshot.sweep, metrics };
   }
-  if (nvdaRegimeReturn <= 0) {
-    return { action: "hold", reason: "long-regime-not-positive", sweep: snapshot.sweep, metrics };
-  }
-  if (relativeGap > RELATIVE_GAP_PCT) {
-    return { action: "hold", reason: "relative-gap-not-wide-enough", sweep: snapshot.sweep, metrics };
+  const primarySignal = nvdaRegimeReturn > 0 && relativeGap <= RELATIVE_GAP_PCT;
+  const timeBoxedFallback = remainingHours <= CLOSE1_TIME_BOXED_ENTRY_HOURS;
+  if (!primarySignal && !timeBoxedFallback) {
+    const reason = nvdaRegimeReturn <= 0
+      ? "long-regime-not-positive"
+      : "relative-gap-not-wide-enough";
+    return { action: "hold", reason, sweep: snapshot.sweep, metrics };
   }
   return {
     action: "candidate",
-    reason: "validated-relative-value-reversion",
+    reason: primarySignal ? "validated-relative-value-reversion" : "time-boxed-long-fallback",
     sweep: snapshot.sweep,
     direction: "long",
     metrics,

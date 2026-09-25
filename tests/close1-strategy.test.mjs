@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   CLOSE1_BENCHMARK,
   CLOSE1_MARKET,
+  CLOSE1_TIME_BOXED_ENTRY_HOURS,
   HYPERLIQUID_INFO_URL,
   analyzeClose1Market,
   fetchBenchmarkCandles,
@@ -112,6 +113,34 @@ test("creates a half-balance long plan only for validated relative-value reversi
   assert.equal(result.riskPlan.allocation, 0.5);
   assert.ok(Number(result.riskPlan.notional) <= 5_000);
   assert.ok(Number(result.riskPlan.beatCurrentTop3Final) > nvda.at(-1));
+});
+
+test("guarantees a time-boxed long candidate if the rare primary signal never arrives", () => {
+  const fallbackNow = Date.parse("2026-09-26T10:00:00Z");
+  const shift = fallbackNow - NOW;
+  const nvda = Array.from({ length: 720 }, (_, index) => 240 - index * 0.02);
+  const benchmark = Array.from({ length: 720 }, (_, index) => 30_000 + index * 0.2);
+  const nvdaCandles = candlesFrom(nvda);
+  const benchmarkCandles = candlesFrom(benchmark, CLOSE1_BENCHMARK);
+  for (const candle of [...nvdaCandles, ...benchmarkCandles]) {
+    candle.t += shift;
+    candle.T += shift;
+  }
+
+  const result = analyzeClose1Market(
+    nvdaCandles,
+    benchmarkCandles,
+    snapshot(nvda.at(-1).toFixed(2)),
+    fallbackNow
+  );
+
+  assert.equal(result.action, "candidate");
+  assert.equal(result.reason, "time-boxed-long-fallback");
+  assert.equal(result.direction, "long");
+  assert.equal(result.metrics.remainingHours, CLOSE1_TIME_BOXED_ENTRY_HOURS);
+  assert.ok(result.metrics.relativeGap168hPct > -5);
+  assert.ok(result.metrics.nvdaReturn672hPct < 0);
+  assert.equal(result.riskPlan.allocation, 0.5);
 });
 
 test("holds if the long regime is not positive or the validated horizon has passed", () => {
