@@ -7,12 +7,33 @@ import {
   CLOSE1_REFEREE_DID,
   CLOSE1_REFEREE_ROOMS,
   CLOSE1_SEED_RECORD,
+  advanceClose1RoomRegistration,
   close1OwnerText,
+  close1RoomText,
   observeClose1,
   registerClose1Owner,
   verifyPinnedSeed,
   verifySignedRecord
 } from "../src/close1-protocol.mjs";
+
+const OWNER_JOURNAL = [
+  {
+    seq: 29,
+    ts: "2026-09-25T17:03:11.780280Z",
+    from: CLOSE1_AGENT_DID,
+    text: "{\"type\":\"close1.registration.intent.v1\",\"season\":\"close-1\",\"did\":\"did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG\",\"observed_sweep\":59,\"package_sha256\":\"bae09812e25eb6f1369c611f24964f7ea0acafddfc45301a16f33f941296dafa\",\"request_id\":\"mabolla-close1-owner-v1\"}",
+    nonce: 1790355785696,
+    sig: "xEDSvj3qiVE7eVA2nq0ZHrg2T_sDYDhTJb2qzGM0s1FiJcL_9lsh0zhvQn9-wuZkkTiFdtOJfH8FW18q2idtAw"
+  },
+  {
+    seq: 30,
+    ts: "2026-09-25T17:03:22.305501Z",
+    from: CLOSE1_AGENT_DID,
+    text: "{\"type\":\"close1.registration.receipt.v1\",\"season\":\"close-1\",\"did\":\"did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG\",\"observed_sweep\":59,\"registration_room\":\"close1\",\"registration_seq\":784880,\"registration_nonce\":\"1790355795828\",\"registration_sig\":\"9eKI4DXExjW60Q3f_60u7hcs1pOH0IzBsSnq8j44a3oZPPRmBfq6fpJzIiWDW1rBF8YCht_SUQvWPhmpckaTCg\",\"request_id\":\"mabolla-close1-owner-v1\"}",
+    nonce: 1790355800114,
+    sig: "bCGe-K7Qjm3bx2CZKYKqvh_AbXkzkqmEEl4meHpUlvsIWVbtXtFfzF7C-49J2G3CVqvR8u293Nqwp8qL-MZLAg"
+  }
+];
 
 const SWEEP_ONE = {
   "d-close1-price": {
@@ -80,6 +101,7 @@ test("builds only Mabolla's exact compact owner registration", () => {
     close1OwnerText(),
     `{"t":"owner","season":"close-1","key":"${CLOSE1_AGENT_DID}"}`
   );
+  assert.equal(close1RoomText(), '{"t":"room","season":"close-1","room":"mabolla-task-relay"}');
 });
 
 test("observes a fully signed common referee sweep", async () => {
@@ -170,4 +192,55 @@ test("registers once through an intent and signed receipt journal", async () => 
   assert.equal(posted[1].text, close1OwnerText());
   assert.match(posted[0].text, /close1\.registration\.intent\.v1/);
   assert.match(posted[2].text, /close1\.registration\.receipt\.v1/);
+});
+
+test("waits two signed sweeps before registering the existing Mabolla room", async () => {
+  const journalText = `${OWNER_JOURNAL.map((record) => JSON.stringify(record)).join("\n")}\n`;
+  const fetchMock = async (url) => {
+    const target = String(url);
+    if (target.includes("/mabolla-task-relay/export")) return new Response(journalText);
+    if (target.includes("/d-close1-flow?")) return Response.json({ messages: [SWEEP_ONE["d-close1-flow"]] });
+    return new Response("not found", { status: 404 });
+  };
+  const result = await advanceClose1RoomRegistration({
+    TECHNOCORE_AGENT_DID: CLOSE1_AGENT_DID,
+    TECHNOCORE_AGENT_PRIVATE_KEY: "unused",
+    CLOSE1_ROOM_REGISTRATION_ENABLED: "true"
+  }, { action: "healthy", sweep: 60 }, {
+    now: Date.parse("2026-09-25T17:04:00Z"),
+    fetch: fetchMock
+  });
+  assert.deepEqual(result, { action: "waiting-for-mint", observedSweep: 59 });
+});
+
+test("submits the existing Mabolla room once after the mint window", async () => {
+  const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+  const privateKey = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64");
+  const posted = [];
+  let sequence = 900;
+  const journalText = `${OWNER_JOURNAL.map((record) => JSON.stringify(record)).join("\n")}\n`;
+  const fetchMock = async (url, init = {}) => {
+    const target = String(url);
+    if (target.includes("/mabolla-task-relay/export")) return new Response(journalText);
+    if (target.includes("/d-close1-flow?")) return Response.json({ messages: [SWEEP_ONE["d-close1-flow"]] });
+    if (init.method === "POST") {
+      const body = JSON.parse(init.body);
+      posted.push({ room: target.split("/r/")[1], ...body, from: body.did, seq: ++sequence });
+      return new Response("ok");
+    }
+    const room = target.split("/r/")[1].split("?")[0];
+    return Response.json({ messages: posted.filter((record) => record.room === room) });
+  };
+  const result = await advanceClose1RoomRegistration({
+    TECHNOCORE_AGENT_DID: CLOSE1_AGENT_DID,
+    TECHNOCORE_AGENT_PRIVATE_KEY: privateKey,
+    CLOSE1_ROOM_REGISTRATION_ENABLED: "true"
+  }, { action: "healthy", sweep: 61 }, {
+    now: Date.parse("2026-09-25T17:08:00Z"),
+    fetch: fetchMock
+  });
+  assert.equal(result.action, "room-submitted");
+  assert.equal(result.registrationSeq, 902);
+  assert.deepEqual(posted.map(({ room }) => room), ["mabolla-task-relay", "close1", "mabolla-task-relay"]);
+  assert.equal(posted[1].text, close1RoomText());
 });
