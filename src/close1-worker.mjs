@@ -1,4 +1,5 @@
 import { CLOSE1_AGENT_DID, advanceClose1RoomRegistration, observeClose1 } from "./close1-protocol.mjs";
+import { analyzeClose1Market, fetchNvdaCandles } from "./close1-strategy.mjs";
 
 export default {
   async scheduled(_controller, env) {
@@ -17,7 +18,19 @@ export default {
       roomRegistration = { action: "error", error: String(error?.message || error) };
       console.error(JSON.stringify({ service: "mabolla-close1-agent", phase: "room-registration", ...roomRegistration }));
     }
-    console.log(JSON.stringify({ service: "mabolla-close1-agent", did: CLOSE1_AGENT_DID, ...result, roomRegistration }));
+    let strategy = { action: "disabled" };
+    if (String(env.CLOSE1_STRATEGY_ENABLED || "").toLowerCase() === "true") {
+      if (result.action !== "healthy") {
+        strategy = { action: "blocked", reason: "unhealthy-signed-snapshot" };
+      } else {
+        try {
+          strategy = analyzeClose1Market(await fetchNvdaCandles(fetch, Date.now()), result);
+        } catch (error) {
+          strategy = { action: "blocked", reason: "market-read-failed", error: String(error?.message || error) };
+        }
+      }
+    }
+    console.log(JSON.stringify({ service: "mabolla-close1-agent", did: CLOSE1_AGENT_DID, ...result, roomRegistration, strategy }));
   },
 
   async fetch(_request, env) {
@@ -32,6 +45,7 @@ export default {
       service: "mabolla-close1-agent",
       season: "close-1",
       mode: String(env.CLOSE1_TRADING_ENABLED || "").toLowerCase() === "true" ? "trading" : "verified-observer",
+      strategy: String(env.CLOSE1_STRATEGY_ENABLED || "").toLowerCase() === "true" ? "market-observer" : "disabled",
       failClosed: true
     }, { headers: { "cache-control": "no-store" } });
   }

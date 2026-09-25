@@ -551,6 +551,7 @@ export async function observeClose1(env, options = {}) {
     owners: state.owners,
     rooms: state.rooms,
     mark: pnl.mark,
+    leaderboard: Array.isArray(pnl.top) ? pnl.top.slice(0, 25) : [],
     tradingEnabled: String(env.CLOSE1_TRADING_ENABLED || "").toLowerCase() === "true"
   };
 }

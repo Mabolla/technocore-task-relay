@@ -10,6 +10,7 @@
   "vars": {
     "TECHNOCORE_URL": "https://technocore.chat",
     "CLOSE1_ROOM_REGISTRATION_ENABLED": "true",
+    "CLOSE1_STRATEGY_ENABLED": "true",
     "CLOSE1_TRADING_ENABLED": "false"
   }
 }
