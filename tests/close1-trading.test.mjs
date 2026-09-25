@@ -279,7 +279,7 @@ test("rejects a candidate computed for a different signed sweep", async () => {
   assert.deepEqual(result, { action: "blocked", reason: "stale-strategy-sweep", position: 0 });
 });
 
-test("blocks a strategy that tries to exceed the hard initial notional cap", async () => {
+test("blocks a strategy that tries to exceed the hard account notional cap", async () => {
   const fetchMock = async (url) => {
     const target = String(url);
     if (target.includes("/mabolla-task-relay/export")) return new Response("");
@@ -293,7 +293,7 @@ test("blocks a strategy that tries to exceed the hard initial notional cap", asy
     action: "candidate",
     sweep: 66,
     direction: "long",
-    riskPlan: { quantity: "20.00" }
+    riskPlan: { quantity: "50.00" }
   }, { action: "ready" }, { now: NOW, fetch: fetchMock });
   assert.deepEqual(result, { action: "blocked", reason: "strategy-risk-cap-violation", position: 0 });
 });
