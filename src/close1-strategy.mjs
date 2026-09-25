@@ -7,7 +7,7 @@ export const CLOSE1_FINAL_AT = "2026-10-04T10:00:00.000Z";
 export const CLOSE1_STARTING_BALANCE = 10_000;
 export const CLOSE1_FEE_RATE = 0.01;
 export const CLOSE1_MAX_ALLOCATION = 0.5;
-export const CLOSE1_STAGE_ONE_ALLOCATION = 0.25;
+export const CLOSE1_CONFIRMED_TARGET_ALLOCATION = 0.5;
 export const CLOSE1_STAGE_ONE_ENTRY_HOURS = 207;
 export const CLOSE1_TIME_BOXED_ENTRY_HOURS = 192;
 
@@ -207,7 +207,7 @@ export function analyzeClose1Market(nvdaCandles, benchmarkCandles, snapshot, now
       targetScore,
       allocation: primarySignal || timeBoxedFallback
         ? CLOSE1_MAX_ALLOCATION
-        : CLOSE1_STAGE_ONE_ALLOCATION
+        : CLOSE1_CONFIRMED_TARGET_ALLOCATION
     })
   };
 }

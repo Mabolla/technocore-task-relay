@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 
 import {
   CLOSE1_BENCHMARK,
+  CLOSE1_CONFIRMED_TARGET_ALLOCATION,
   CLOSE1_MARKET,
-  CLOSE1_STAGE_ONE_ALLOCATION,
   CLOSE1_STAGE_ONE_ENTRY_HOURS,
   CLOSE1_TIME_BOXED_ENTRY_HOURS,
   HYPERLIQUID_INFO_URL,
@@ -125,7 +125,7 @@ test("creates a half-balance long plan only for validated relative-value reversi
   assert.ok(Number(result.riskPlan.beatCurrentTop3Final) > nvda.at(-1));
 });
 
-test("starts with a quarter-balance long before the hard fallback", () => {
+test("targets the confirmed two-tranche allocation before the hard fallback", () => {
   const stageNow = Date.parse("2026-09-25T19:00:00Z");
   const shift = stageNow - NOW;
   const nvda = Array.from({ length: 720 }, (_, index) => 220 + index * 0.01);
@@ -149,8 +149,8 @@ test("starts with a quarter-balance long before the hard fallback", () => {
   assert.equal(result.direction, "long");
   assert.equal(result.metrics.remainingHours, CLOSE1_STAGE_ONE_ENTRY_HOURS);
   assert.ok(result.metrics.relativeGap168hPct > -5);
-  assert.equal(result.riskPlan.allocation, CLOSE1_STAGE_ONE_ALLOCATION);
-  assert.ok(Number(result.riskPlan.notional) <= 2_500);
+  assert.equal(result.riskPlan.allocation, CLOSE1_CONFIRMED_TARGET_ALLOCATION);
+  assert.ok(Number(result.riskPlan.notional) <= 5_000);
 });
 
 test("guarantees a time-boxed long candidate if the rare primary signal never arrives", () => {

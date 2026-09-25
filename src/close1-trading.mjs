@@ -25,6 +25,8 @@ const MAX_INITIAL_NOTIONAL = 5_000;
 const OUTCOME_LOOKBACK = 200;
 const MAKER_OFFER_LIFETIME_SWEEPS = 2;
 export const CLOSE1_PROFIT_LOCK_PCT = 3;
+export const CLOSE1_SECOND_TRANCHE_EXIT_PRICE = 230;
+export const CLOSE1_SECOND_TRANCHE_ENTRY_CEILING = 225.4;
 
 function positiveAmount(value) {
   if (typeof value !== "string" || !AMOUNT.test(value)) return null;
@@ -357,36 +359,97 @@ export function close1ProfitLockPlan(actions, outcomes, position, reference) {
   if (!Array.isArray(actions) || !(outcomes instanceof Map) || !Number.isFinite(mark) || mark <= 0) {
     return { action: "blocked", reason: "invalid-profit-lock-input" };
   }
-  const settled = actions.filter((action) => outcomes.get(action?.body?.terms?.id)?.outcome === "settled");
-  if (settled.some((action) => action.direction === "short")) {
-    return { action: "closed", reason: "profit-lock-complete" };
-  }
-  if (!Number.isFinite(position) || position <= 0) return { action: "hold", reason: "no-long-position" };
-  const longs = settled.filter((action) => action.direction === "long");
-  const quantity = longs.reduce((total, action) => total + Number(action.body.terms.qty), 0);
-  const notional = longs.reduce((total, action) =>
-    total + Number(action.body.terms.qty) * Number(action.body.terms.px), 0);
-  if (!Number.isFinite(quantity) || !Number.isFinite(notional) || quantity <= 0
-    || Math.abs(quantity - position) > 0.011) {
+  if (!Number.isFinite(position) || position < 0) {
     return { action: "blocked", reason: "unreconciled-profit-lock-position" };
   }
-  const averageEntry = notional / quantity;
-  const triggerPrice = Math.ceil((averageEntry * (1 + CLOSE1_PROFIT_LOCK_PCT / 100) - Number.EPSILON) * 100) / 100;
-  if (mark + 1e-9 < triggerPrice) {
+  const settled = actions
+    .filter((action) => outcomes.get(action?.body?.terms?.id)?.outcome === "settled")
+    .sort((left, right) => Number(left?.record?.seq || 0) - Number(right?.record?.seq || 0));
+  const lots = [];
+  let longOrdinal = 0;
+  let hasSettledExit = false;
+  for (const action of settled) {
+    const quantity = Number(action?.body?.terms?.qty);
+    const entryPrice = Number(action?.body?.terms?.px);
+    if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(entryPrice) || entryPrice <= 0) {
+      return { action: "blocked", reason: "invalid-settled-profit-lock-action" };
+    }
+    if (action.direction === "long") {
+      lots.push({ ordinal: longOrdinal, quantity, entryPrice });
+      longOrdinal += 1;
+      continue;
+    }
+    if (action.direction !== "short") {
+      return { action: "blocked", reason: "invalid-settled-profit-lock-direction" };
+    }
+    hasSettledExit = true;
+    let remaining = quantity;
+    for (let index = lots.length - 1; index >= 0 && remaining > 0.001; index -= 1) {
+      const closed = Math.min(lots[index].quantity, remaining);
+      lots[index].quantity = Math.round((lots[index].quantity - closed) * 100) / 100;
+      remaining = Math.round((remaining - closed) * 100) / 100;
+    }
+    if (remaining > 0.011) return { action: "blocked", reason: "unreconciled-profit-lock-exit" };
+  }
+  const openLots = lots.filter(({ quantity }) => quantity >= 0.1).map((lot) => ({
+    ...lot,
+    triggerPrice: lot.ordinal === 0
+      ? Math.ceil((lot.entryPrice * (1 + CLOSE1_PROFIT_LOCK_PCT / 100) - Number.EPSILON) * 100) / 100
+      : CLOSE1_SECOND_TRANCHE_EXIT_PRICE
+  }));
+  const openQuantity = openLots.reduce((total, lot) => total + lot.quantity, 0);
+  if (Math.abs(openQuantity - position) > 0.011) {
+    return { action: "blocked", reason: "unreconciled-profit-lock-position" };
+  }
+  if (openLots.length === 0) {
+    return hasSettledExit
+      ? { action: "closed", reason: "profit-lock-complete" }
+      : { action: "hold", reason: "no-long-position" };
+  }
+  const notional = openLots.reduce((total, lot) => total + lot.quantity * lot.entryPrice, 0);
+  const averageEntry = notional / openQuantity;
+  const triggerPrice = Math.min(...openLots.map((lot) => lot.triggerPrice));
+  const eligible = openLots.filter((lot) => mark + 1e-9 >= lot.triggerPrice);
+  if (eligible.length === 0) {
     return {
       action: "hold",
       reason: "profit-lock-not-reached",
       averageEntry: fixed2(averageEntry),
-      triggerPrice: fixed2(triggerPrice)
+      triggerPrice: fixed2(triggerPrice),
+      ...(hasSettledExit ? { reentryBlocked: true } : {})
     };
   }
+  const closeQuantity = eligible.reduce((total, lot) => total + lot.quantity, 0);
+  const closeNotional = eligible.reduce((total, lot) => total + lot.quantity * lot.entryPrice, 0);
+  const closeTrigger = Math.max(...eligible.map((lot) => lot.triggerPrice));
   return {
     action: "close",
-    reason: "three-percent-profit-lock",
-    quantity: fixed2(position),
-    averageEntry: fixed2(averageEntry),
-    triggerPrice: fixed2(triggerPrice)
+    reason: eligible.some(({ ordinal }) => ordinal > 0)
+      ? "second-tranche-fixed-profit-lock"
+      : "three-percent-profit-lock",
+    quantity: fixed2(closeQuantity),
+    averageEntry: fixed2(closeNotional / closeQuantity),
+    triggerPrice: fixed2(closeTrigger)
   };
+}
+
+export function close1SecondTrancheEntryGuard(position, remainingQty, reference) {
+  const currentPosition = Number(position);
+  const remaining = Number(remainingQty);
+  const mark = Number(reference);
+  if (!Number.isFinite(currentPosition) || currentPosition < 0 || !Number.isFinite(remaining) || remaining < 0
+    || !Number.isFinite(mark) || mark <= 0) {
+    return { action: "blocked", reason: "invalid-second-tranche-entry-input" };
+  }
+  if (currentPosition > 0 && remaining >= 0.1 && mark > CLOSE1_SECOND_TRANCHE_ENTRY_CEILING) {
+    return {
+      action: "hold",
+      reason: "second-tranche-entry-above-profitable-cap",
+      entryCeiling: CLOSE1_SECOND_TRANCHE_ENTRY_CEILING.toFixed(2),
+      exitPrice: CLOSE1_SECOND_TRANCHE_EXIT_PRICE.toFixed(2)
+    };
+  }
+  return { action: "allow" };
 }
 
 function makeOfferTerms(snapshot, direction, quantity) {
@@ -451,7 +514,7 @@ export async function advanceClose1Trading(env, snapshot, strategy, roomRegistra
     return { action: "hold", reason: profitLock.reason, position };
   }
   if (profitLock.action === "close") {
-    const terms = makeOfferTerms(snapshot, "short", position);
+    const terms = makeOfferTerms(snapshot, "short", Number(profitLock.quantity));
     const termsText = canonicalClose1Terms(terms);
     const makerSig = await signClose1Payload(`close-1|terms|${termsText}`, env);
     const offerText = JSON.stringify({ t: "offer", season: CLOSE1_SEASON, terms, maker_sig: makerSig });
@@ -473,8 +536,15 @@ export async function advanceClose1Trading(env, snapshot, strategy, roomRegistra
       position,
       averageEntry: profitLock.averageEntry,
       triggerPrice: profitLock.triggerPrice,
-      scoreTarget: profitLock.scoreTarget,
       ...visibility
+    };
+  }
+  if (profitLock.reentryBlocked) {
+    return {
+      action: "hold",
+      reason: "profit-lock-partially-complete",
+      position,
+      triggerPrice: profitLock.triggerPrice
     };
   }
   if (strategy?.action !== "candidate") {
@@ -495,6 +565,8 @@ export async function advanceClose1Trading(env, snapshot, strategy, roomRegistra
   const directionalPosition = direction === "long" ? position : -position;
   const remainingQty = Math.floor((requestedTarget - Math.max(0, directionalPosition) + Number.EPSILON) * 100) / 100;
   if (remainingQty < 0.1) return { action: "position-ready", direction, position, targetQty: requestedTarget };
+  const secondTrancheGuard = close1SecondTrancheEntryGuard(position, remainingQty, reference);
+  if (secondTrancheGuard.action !== "allow") return { ...secondTrancheGuard, position };
 
   const knownIds = new Set([
     ...ledger.actions.map((action) => action.body.terms.id),
