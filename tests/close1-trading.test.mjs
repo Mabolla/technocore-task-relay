@@ -176,7 +176,7 @@ test("trading stays disabled or holds without any write", async () => {
   assert.equal(writes, 0);
 });
 
-test("posts one capped maker offer to the journal and public room", async () => {
+test("posts one capped maker offer with two sweeps for counterparties to settle", async () => {
   const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
   const privateKey = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64");
   const posted = [];
@@ -208,7 +208,7 @@ test("posts one capped maker offer to the journal and public room", async () => 
   assert.equal(result.action, "offer-posted");
   assert.equal(result.direction, "long");
   assert.equal(result.qty, "10.99");
-  assert.equal(result.until, 67);
+  assert.equal(result.until, 68);
   assert.deepEqual(posted.map(({ room }) => room), ["mabolla-task-relay", "close1", "mabolla-task-relay"]);
   const offer = JSON.parse(posted[0].text);
   assert.equal(offer.t, "offer");
