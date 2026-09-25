@@ -304,12 +304,24 @@ test("posts one capped maker offer with two sweeps for counterparties to settle"
   assert.equal(result.direction, "long");
   assert.equal(result.qty, "10.99");
   assert.equal(result.until, 68);
-  assert.deepEqual(posted.map(({ room }) => room), ["mabolla-task-relay", "close1", "mabolla-task-relay"]);
+  assert.deepEqual(posted.map(({ room }) => room), [
+    "mabolla-task-relay",
+    "close1",
+    "close1",
+    "mabolla-task-relay"
+  ]);
   const offer = JSON.parse(posted[0].text);
   assert.equal(offer.t, "offer");
   assert.equal(offer.terms.side, "buy");
   assert.equal(offer.terms.taker, "any");
-  assert.match(posted[2].text, /close1\.offer\.visible\.v1/);
+  assert.deepEqual(JSON.parse(posted[1].text), {
+    t: "owner",
+    season: "close-1",
+    key: CLOSE1_AGENT_DID
+  });
+  assert.equal(JSON.parse(posted[2].text).terms.id, offer.terms.id);
+  assert.ok(Number(posted[2].nonce) > Number(posted[1].nonce));
+  assert.match(posted[3].text, /close1\.offer\.visible\.v1/);
 });
 
 test("countersigns one verified owner offer and posts it only in the registered journal", async () => {

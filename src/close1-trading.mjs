@@ -6,6 +6,7 @@ import {
   CLOSE1_REFEREE_DID,
   CLOSE1_SEASON,
   CLOSE1_TRADING_ROOM,
+  close1OwnerText,
   publishSignedRecord,
   signClose1Payload,
   verifyDidSignature,
@@ -291,12 +292,22 @@ function visibilityText(action, publicRecord) {
 }
 
 async function publishOfferVisibility(action, env, fetchImpl, now) {
+  // Counterparties verify offers against an owner record in the same bounded
+  // public-room window. Refresh that proof immediately before every offer so
+  // high room throughput cannot strand an otherwise valid maker order.
+  const ownerRecord = await publishSignedRecord(
+    CLOSE1_TRADING_ROOM,
+    close1OwnerText(),
+    env,
+    fetchImpl,
+    Math.max(Math.trunc(now), Number(action.record.nonce) + 1)
+  );
   const publicRecord = await publishSignedRecord(
     CLOSE1_TRADING_ROOM,
     action.record.text,
     env,
     fetchImpl,
-    Math.max(Math.trunc(now), Number(action.record.nonce) + 1)
+    Math.max(Math.trunc(now) + 1, Number(ownerRecord.nonce) + 1)
   );
   const marker = await publishSignedRecord(
     CLOSE1_CONTROL_ROOM,
@@ -305,7 +316,11 @@ async function publishOfferVisibility(action, env, fetchImpl, now) {
     fetchImpl,
     Math.max(Math.trunc(now) + 1, Number(publicRecord.nonce) + 1)
   );
-  return { publicSeq: Number(publicRecord.seq), markerSeq: Number(marker.seq) };
+  return {
+    ownerSeq: Number(ownerRecord.seq),
+    publicSeq: Number(publicRecord.seq),
+    markerSeq: Number(marker.seq)
+  };
 }
 
 async function reconcileOutcomes(journal, flows, snapshot, env, fetchImpl, now) {
