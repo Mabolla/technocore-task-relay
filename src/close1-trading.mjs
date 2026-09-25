@@ -23,6 +23,7 @@ const OFFER_MAX_AGE_MS = 12 * 60 * 1000;
 const MAX_PRICE_SLIPPAGE = 0.0025;
 const MAX_INITIAL_NOTIONAL = 5_000;
 const OUTCOME_LOOKBACK = 200;
+const MAKER_OFFER_LIFETIME_SWEEPS = 2;
 
 function positiveAmount(value) {
   if (typeof value !== "string" || !AMOUNT.test(value)) return null;
@@ -362,7 +363,7 @@ function makeOfferTerms(snapshot, direction, quantity) {
     qty: fixed2(quantity),
     side: direction === "long" ? "buy" : "sell",
     taker: "any",
-    until: Math.min(snapshot.sweep + 1, CLOSE1_LOCK_SWEEP)
+    until: Math.min(snapshot.sweep + MAKER_OFFER_LIFETIME_SWEEPS, CLOSE1_LOCK_SWEEP)
   };
 }
 
