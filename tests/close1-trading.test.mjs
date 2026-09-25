@@ -24,6 +24,24 @@ const FLOW = {
   sig: "G-v95okSmy1RZ9O1FoKXLoWx2fj0tiRNNiY1pgtd1uR4LP7w99UnF4uAq656L-yO-XUS-Y0JN_Kxb0y8GdoxDw"
 };
 
+const ACTIVE_OFFER = {
+  seq: 64,
+  ts: "2026-09-25T21:21:11.470315Z",
+  from: CLOSE1_AGENT_DID,
+  text: "{\"t\":\"offer\",\"season\":\"close-1\",\"terms\":{\"id\":\"mb112l280fb60bc4f8\",\"maker\":\"did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG\",\"px\":\"225.04\",\"qty\":\"10.97\",\"side\":\"buy\",\"taker\":\"any\",\"until\":114},\"maker_sig\":\"6qopvqe7CVgNlN_0jWTdHpNkTd5P_YYFwkt9F2EpxsczcwR6SFoLRzLnY-MtbGxQW3VBk--35ADSLXK9LwfwBw\"}",
+  nonce: 1790371269198,
+  sig: "hWVNsFuYmlslWyI0i9t4txr6MtMCfDpUZ5la4SzV9NznF_lYqKZLpzhjMJGO36DhWf2irtapIeTzEOlPgpvfDg"
+};
+
+const ACTIVE_OFFER_MARKER = {
+  seq: 65,
+  ts: "2026-09-25T21:21:13.574787Z",
+  from: CLOSE1_AGENT_DID,
+  text: "{\"type\":\"close1.offer.visible.v1\",\"season\":\"close-1\",\"did\":\"did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG\",\"trade_id\":\"mb112l280fb60bc4f8\",\"public_seq\":1026041,\"public_nonce\":\"1790371269200\",\"public_sig\":\"cAo9oPJ_4AhncLthuFBdWPc3tuarohlng2C0El-bcXwWDPRghMM0PiqhvLy6tMK9xZmZkRxKphWLbFIo24HYDw\"}",
+  nonce: 1790371269201,
+  sig: "zKmYOKBaha8Rp-NGrzBFTtEc2BSXucNwUDaH1cU94W-pYU5_7uMYqxPdF2BQOlp5G4s2ES8VZ0ebkIVc3L5dCg"
+};
+
 function base58(bytes) {
   const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
   const digits = [0];
@@ -322,6 +340,44 @@ test("posts one capped maker offer with two sweeps for counterparties to settle"
   assert.equal(JSON.parse(posted[2].text).terms.id, offer.terms.id);
   assert.ok(Number(posted[2].nonce) > Number(posted[1].nonce));
   assert.match(posted[3].text, /close1\.offer\.visible\.v1/);
+});
+
+test("refreshes owner proof while a visible maker offer remains active", async () => {
+  const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+  const privateKey = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64");
+  const posted = [];
+  const fetchMock = async (url, init = {}) => {
+    const target = String(url);
+    if (target.includes("/mabolla-task-relay/export")) {
+      return new Response(`${JSON.stringify(ACTIVE_OFFER)}\n${JSON.stringify(ACTIVE_OFFER_MARKER)}\n`);
+    }
+    if (target.includes("/d-close1-flow?")) return Response.json({ messages: [FLOW] });
+    if (init.method === "POST") {
+      const body = JSON.parse(init.body);
+      posted.push({ room: target.split("/r/")[1], ...body, from: body.did, seq: 901 });
+      return new Response("ok");
+    }
+    return Response.json({ messages: posted });
+  };
+  const result = await advanceClose1Trading({
+    TECHNOCORE_AGENT_DID: CLOSE1_AGENT_DID,
+    TECHNOCORE_AGENT_PRIVATE_KEY: privateKey,
+    CLOSE1_TRADING_ENABLED: "true"
+  }, snapshot(), { action: "hold", reason: "not-needed" }, { action: "ready" }, { now: NOW, fetch: fetchMock });
+
+  assert.deepEqual(result, {
+    action: "waiting-offer",
+    tradeId: "mb112l280fb60bc4f8",
+    position: 0,
+    ownerSeq: 901
+  });
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].room, "close1");
+  assert.deepEqual(JSON.parse(posted[0].text), {
+    t: "owner",
+    season: "close-1",
+    key: CLOSE1_AGENT_DID
+  });
 });
 
 test("countersigns one verified owner offer and posts it only in the registered journal", async () => {

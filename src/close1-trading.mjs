@@ -323,6 +323,17 @@ async function publishOfferVisibility(action, env, fetchImpl, now) {
   };
 }
 
+async function refreshOfferOwnerProof(action, env, fetchImpl, now) {
+  const ownerRecord = await publishSignedRecord(
+    CLOSE1_TRADING_ROOM,
+    close1OwnerText(),
+    env,
+    fetchImpl,
+    Math.max(Math.trunc(now), Number(action.record.nonce) + 1)
+  );
+  return Number(ownerRecord.seq);
+}
+
 async function reconcileOutcomes(journal, flows, snapshot, env, fetchImpl, now) {
   const actions = await ownActions(journal);
   const outcomes = outcomeNotes(journal);
@@ -511,7 +522,8 @@ export async function advanceClose1Trading(env, snapshot, strategy, roomRegistra
       const visibility = await publishOfferVisibility(activeOffer, env, fetchImpl, now);
       return { action: "offer-visible", tradeId: activeOffer.body.terms.id, position, ...visibility };
     }
-    return { action: "waiting-offer", tradeId: activeOffer.body.terms.id, position };
+    const ownerSeq = await refreshOfferOwnerProof(activeOffer, env, fetchImpl, now);
+    return { action: "waiting-offer", tradeId: activeOffer.body.terms.id, position, ownerSeq };
   }
   const pendingTrade = ledger.unresolved.find((action) => action.role === "taker");
   if (pendingTrade) return { action: "waiting-trade", tradeId: pendingTrade.body.terms.id, position };
