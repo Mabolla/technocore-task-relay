@@ -157,24 +157,33 @@ test("selects price-compatible offers without exceeding the remaining cap", asyn
   }), null);
 });
 
-test("locks a settled long only after a three-percent move and never reopens a closed cycle", () => {
+test("locks a settled long only above the five-percent and competitive score floors", () => {
   const long = {
     direction: "long",
     body: { terms: { id: "long-1", qty: "11.01", px: "224.71" } }
   };
   const outcomes = new Map([["long-1", { outcome: "settled" }]]);
-  assert.deepEqual(close1ProfitLockPlan([long], outcomes, 11.01, "231.45"), {
+  assert.deepEqual(close1ProfitLockPlan([long], outcomes, 11.01, "235.94", "58.21"), {
     action: "hold",
     reason: "profit-lock-not-reached",
     averageEntry: "224.71",
-    triggerPrice: "231.46"
+    triggerPrice: "235.95",
+    scoreTarget: "68.21"
   });
-  assert.deepEqual(close1ProfitLockPlan([long], outcomes, 11.01, "231.46"), {
+  assert.deepEqual(close1ProfitLockPlan([long], outcomes, 11.01, "235.95", "58.21"), {
     action: "close",
-    reason: "three-percent-profit-lock",
+    reason: "competitive-profit-lock",
     quantity: "11.01",
     averageEntry: "224.71",
-    triggerPrice: "231.46"
+    triggerPrice: "235.95",
+    scoreTarget: "68.21"
+  });
+  assert.deepEqual(close1ProfitLockPlan([long], outcomes, 11.01, "235.95", "100.00"), {
+    action: "hold",
+    reason: "profit-lock-not-reached",
+    averageEntry: "224.71",
+    triggerPrice: "239.35",
+    scoreTarget: "110.00"
   });
 
   const close = {
