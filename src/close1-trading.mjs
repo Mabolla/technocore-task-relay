@@ -21,7 +21,7 @@ const MAX_PUBLIC_MESSAGES = 200;
 const MAX_JOURNAL_BYTES = 256_000;
 const OFFER_MAX_AGE_MS = 12 * 60 * 1000;
 const MAX_PRICE_SLIPPAGE = 0.0025;
-const MAX_INITIAL_NOTIONAL = 2_500;
+const MAX_INITIAL_NOTIONAL = 10_000;
 const OUTCOME_LOOKBACK = 200;
 
 function positiveAmount(value) {

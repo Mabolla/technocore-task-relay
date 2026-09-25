@@ -1,10 +1,19 @@
 const HOUR_MS = 60 * 60 * 1000;
 
 export const CLOSE1_MARKET = "xyz:NVDA";
+export const CLOSE1_BENCHMARK = "xyz:XYZ100";
 export const HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info";
+export const CLOSE1_FINAL_AT = "2026-10-04T10:00:00.000Z";
 export const CLOSE1_STARTING_BALANCE = 10_000;
 export const CLOSE1_FEE_RATE = 0.01;
-export const CLOSE1_MAX_INITIAL_ALLOCATION = 0.25;
+export const CLOSE1_MAX_ALLOCATION = 1;
+
+const MIN_CANDLE_HISTORY = 700;
+const RELATIVE_LOOKBACK_HOURS = 168;
+const REGIME_LOOKBACK_HOURS = 672;
+const RELATIVE_GAP_PCT = -5;
+const MIN_ENTRY_HOURS = 96;
+const MAX_ENTRY_HOURS = 216;
 
 function finitePositive(value, label) {
   const number = Number(value);
@@ -21,28 +30,20 @@ function pct(current, previous) {
   return round((current / previous - 1) * 100);
 }
 
-function mean(values) {
-  return values.reduce((total, value) => total + value, 0) / values.length;
-}
-
-function sampleStdDev(values) {
-  if (values.length < 2) return 0;
-  const average = mean(values);
-  return Math.sqrt(values.reduce((total, value) => total + (value - average) ** 2, 0) / (values.length - 1));
-}
-
-export function validateNvdaCandles(candles, now = Date.now()) {
-  if (!Array.isArray(candles) || candles.length < 96) throw new Error("Insufficient NVDA candle history");
+export function validateHourlyCandles(candles, market, now = Date.now()) {
+  if (!Array.isArray(candles) || candles.length < MIN_CANDLE_HISTORY) {
+    throw new Error(`Insufficient ${market} candle history`);
+  }
   let previousStart = -1;
-  return candles.map((candle) => {
-    if (candle?.s !== CLOSE1_MARKET || candle?.i !== "1h") throw new Error("Unexpected NVDA candle market");
+  const parsed = candles.map((candle) => {
+    if (candle?.s !== market || candle?.i !== "1h") throw new Error(`Unexpected ${market} candle market`);
     const start = Number(candle.t);
     const end = Number(candle.T);
     if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start <= previousStart || end <= start) {
-      throw new Error("Invalid NVDA candle chronology");
+      throw new Error(`Invalid ${market} candle chronology`);
     }
     previousStart = start;
-    const parsed = {
+    const item = {
       start,
       end,
       open: finitePositive(candle.o, "candle open"),
@@ -51,34 +52,47 @@ export function validateNvdaCandles(candles, now = Date.now()) {
       close: finitePositive(candle.c, "candle close"),
       volume: Number(candle.v)
     };
-    if (!Number.isFinite(parsed.volume) || parsed.volume < 0 || parsed.low > parsed.high
-      || parsed.open < parsed.low || parsed.open > parsed.high || parsed.close < parsed.low || parsed.close > parsed.high) {
-      throw new Error("Invalid NVDA candle values");
+    if (!Number.isFinite(item.volume) || item.volume < 0 || item.low > item.high
+      || item.open < item.low || item.open > item.high || item.close < item.low || item.close > item.high) {
+      throw new Error(`Invalid ${market} candle values`);
     }
-    return parsed;
+    return item;
   }).filter(({ start }) => start <= now + 5 * 60 * 1000);
+  const latest = parsed.at(-1);
+  if (!latest || now - latest.start > 2 * HOUR_MS) throw new Error(`Stale ${market} candle history`);
+  return parsed;
 }
 
-export async function fetchNvdaCandles(fetchImpl = fetch, now = Date.now()) {
+export function validateNvdaCandles(candles, now = Date.now()) {
+  return validateHourlyCandles(candles, CLOSE1_MARKET, now);
+}
+
+async function fetchHourlyCandles(market, fetchImpl = fetch, now = Date.now()) {
   const response = await fetchImpl(HYPERLIQUID_INFO_URL, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify({
       type: "candleSnapshot",
       req: {
-        coin: CLOSE1_MARKET,
+        coin: market,
         interval: "1h",
-        startTime: now - 7 * 24 * HOUR_MS,
+        startTime: now - 32 * 24 * HOUR_MS,
         endTime: now
       }
     })
   });
-  if (!response.ok) throw new Error(`Hyperliquid candle read failed: ${response.status}`);
+  if (!response.ok) throw new Error(`Hyperliquid ${market} candle read failed: ${response.status}`);
   const payload = await response.json();
-  const candles = validateNvdaCandles(payload, now);
-  const latest = candles.at(-1);
-  if (!latest || now - latest.start > 2 * HOUR_MS) throw new Error("Stale NVDA candle history");
+  validateHourlyCandles(payload, market, now);
   return payload;
+}
+
+export function fetchNvdaCandles(fetchImpl = fetch, now = Date.now()) {
+  return fetchHourlyCandles(CLOSE1_MARKET, fetchImpl, now);
+}
+
+export function fetchBenchmarkCandles(fetchImpl = fetch, now = Date.now()) {
+  return fetchHourlyCandles(CLOSE1_BENCHMARK, fetchImpl, now);
 }
 
 export function sizeClose1Position({
@@ -86,15 +100,15 @@ export function sizeClose1Position({
   entryPrice,
   targetScore,
   balance = CLOSE1_STARTING_BALANCE,
-  allocation = CLOSE1_MAX_INITIAL_ALLOCATION
+  allocation = CLOSE1_MAX_ALLOCATION
 }) {
   if (!new Set(["long", "short"]).has(side)) throw new Error("Invalid Close-1 side");
   const entry = finitePositive(entryPrice, "entry price");
   const score = Number(targetScore);
   const cash = finitePositive(balance, "balance");
   if (!Number.isFinite(score) || score < 0) throw new Error("Invalid target score");
-  if (!Number.isFinite(allocation) || allocation <= 0 || allocation > CLOSE1_MAX_INITIAL_ALLOCATION) {
-    throw new Error("Initial allocation exceeds Close-1 risk cap");
+  if (!Number.isFinite(allocation) || allocation <= 0 || allocation > CLOSE1_MAX_ALLOCATION) {
+    throw new Error("Allocation exceeds Close-1 risk cap");
   }
   const quantity = Math.floor((cash * allocation) / (entry * (1 + CLOSE1_FEE_RATE)) * 100) / 100;
   if (quantity < 0.1) throw new Error("Allocation is below the Close-1 minimum quantity");
@@ -114,50 +128,74 @@ export function sizeClose1Position({
   };
 }
 
-export function analyzeClose1Market(candles, snapshot) {
+function alignedHistory(nvdaCandles, benchmarkCandles, now) {
+  const nvda = validateHourlyCandles(nvdaCandles, CLOSE1_MARKET, now);
+  const benchmark = validateHourlyCandles(benchmarkCandles, CLOSE1_BENCHMARK, now);
+  const byStart = new Map(benchmark.map((candle) => [candle.start, candle]));
+  const aligned = nvda.filter(({ start }) => byStart.has(start)).map((candle) => ({
+    start: candle.start,
+    nvda: candle,
+    benchmark: byStart.get(candle.start)
+  }));
+  if (aligned.length < MIN_CANDLE_HISTORY) throw new Error("Insufficient aligned Close-1 market history");
+  return aligned;
+}
+
+export function analyzeClose1Market(nvdaCandles, benchmarkCandles, snapshot, now = Date.now()) {
   if (snapshot?.action !== "healthy" || !Number.isSafeInteger(snapshot?.sweep)) {
     return { action: "blocked", reason: "unhealthy-signed-snapshot" };
   }
-  const parsed = validateNvdaCandles(candles);
-  const closes = parsed.map(({ close }) => close);
-  const latest = closes.at(-1);
+  const history = alignedHistory(nvdaCandles, benchmarkCandles, now);
+  const latest = history.at(-1);
+  const nvdaLast = latest.nvda.close;
+  const benchmarkLast = latest.benchmark.close;
   const signedReference = finitePositive(snapshot.reference, "signed reference");
-  const divergencePct = Math.abs(latest / signedReference - 1) * 100;
+  const divergencePct = Math.abs(nvdaLast / signedReference - 1) * 100;
   if (divergencePct > 1) return { action: "blocked", reason: "market-reference-divergence" };
 
-  const sma = (period) => mean(closes.slice(-period));
-  const hourlyReturns = closes.slice(1).map((close, index) => Math.log(close / closes[index]));
-  const return24h = pct(latest, closes.at(-25));
-  const return72h = pct(latest, closes.at(-73));
-  const sma24 = sma(24);
-  const sma72 = sma(72);
-  const bullish = return24h >= 1 && return72h >= 2 && latest > sma24 && sma24 > sma72;
-  const bearish = return24h <= -1 && return72h <= -2 && latest < sma24 && sma24 < sma72;
-  const direction = bullish ? "long" : bearish ? "short" : null;
+  const relativeBase = history.at(-(RELATIVE_LOOKBACK_HOURS + 1));
+  const regimeBase = history.at(-(REGIME_LOOKBACK_HOURS + 1));
+  const nvdaRelativeReturn = pct(nvdaLast, relativeBase.nvda.close);
+  const benchmarkRelativeReturn = pct(benchmarkLast, relativeBase.benchmark.close);
+  const relativeGap = round(nvdaRelativeReturn - benchmarkRelativeReturn);
+  const nvdaRegimeReturn = pct(nvdaLast, regimeBase.nvda.close);
+  const remainingHours = (Date.parse(CLOSE1_FINAL_AT) - now) / HOUR_MS;
   const board = Array.isArray(snapshot.leaderboard) ? snapshot.leaderboard : [];
   const targetScore = Number(board[Math.min(2, board.length - 1)]?.[1] ?? 0);
   if (!Number.isFinite(targetScore) || targetScore < 0) {
     return { action: "blocked", reason: "invalid-signed-leaderboard" };
   }
   const metrics = {
-    last: round(latest, 2).toFixed(2),
+    last: round(nvdaLast, 2).toFixed(2),
+    benchmarkLast: round(benchmarkLast, 2).toFixed(2),
     signedReference: round(signedReference, 2).toFixed(2),
-    return24hPct: return24h,
-    return72hPct: return72h,
-    sma24: round(sma24, 2).toFixed(2),
-    sma72: round(sma72, 2).toFixed(2),
-    sevenDayHigh: round(Math.max(...parsed.map(({ high }) => high)), 2).toFixed(2),
-    sevenDayLow: round(Math.min(...parsed.map(({ low }) => low)), 2).toFixed(2),
-    hourlyVolatilityPct: round(sampleStdDev(hourlyReturns) * 100),
+    nvdaReturn168hPct: nvdaRelativeReturn,
+    benchmarkReturn168hPct: benchmarkRelativeReturn,
+    relativeGap168hPct: relativeGap,
+    nvdaReturn672hPct: nvdaRegimeReturn,
+    remainingHours: round(remainingHours, 2),
     currentTop3Score: round(targetScore, 2).toFixed(2)
   };
-  if (!direction) return { action: "hold", reason: "mixed-trend", sweep: snapshot.sweep, metrics };
+  if (remainingHours < MIN_ENTRY_HOURS || remainingHours > MAX_ENTRY_HOURS) {
+    return { action: "hold", reason: "outside-validated-entry-window", sweep: snapshot.sweep, metrics };
+  }
+  if (nvdaRegimeReturn <= 0) {
+    return { action: "hold", reason: "long-regime-not-positive", sweep: snapshot.sweep, metrics };
+  }
+  if (relativeGap > RELATIVE_GAP_PCT) {
+    return { action: "hold", reason: "relative-gap-not-wide-enough", sweep: snapshot.sweep, metrics };
+  }
   return {
     action: "candidate",
-    reason: "aligned-24h-72h-trend",
+    reason: "validated-relative-value-reversion",
     sweep: snapshot.sweep,
-    direction,
+    direction: "long",
     metrics,
-    riskPlan: sizeClose1Position({ side: direction, entryPrice: signedReference, targetScore })
+    riskPlan: sizeClose1Position({
+      side: "long",
+      entryPrice: signedReference,
+      targetScore,
+      allocation: CLOSE1_MAX_ALLOCATION
+    })
   };
 }

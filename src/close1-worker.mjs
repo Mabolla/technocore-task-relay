@@ -1,5 +1,5 @@
 import { CLOSE1_AGENT_DID, advanceClose1RoomRegistration, observeClose1 } from "./close1-protocol.mjs";
-import { analyzeClose1Market, fetchNvdaCandles } from "./close1-strategy.mjs";
+import { analyzeClose1Market, fetchBenchmarkCandles, fetchNvdaCandles } from "./close1-strategy.mjs";
 import { advanceClose1Trading } from "./close1-trading.mjs";
 
 export default {
@@ -25,7 +25,12 @@ export default {
         strategy = { action: "blocked", reason: "unhealthy-signed-snapshot" };
       } else {
         try {
-          strategy = analyzeClose1Market(await fetchNvdaCandles(fetch, Date.now()), result);
+          const marketNow = Date.now();
+          const [nvda, benchmark] = await Promise.all([
+            fetchNvdaCandles(fetch, marketNow),
+            fetchBenchmarkCandles(fetch, marketNow)
+          ]);
+          strategy = analyzeClose1Market(nvda, benchmark, result, marketNow);
         } catch (error) {
           strategy = { action: "blocked", reason: "market-read-failed", error: String(error?.message || error) };
         }
