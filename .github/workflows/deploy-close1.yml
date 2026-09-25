@@ -9,6 +9,8 @@ on:
       - scripts/register-close1.mjs
       - scripts/verify-probe-identity.mjs
       - src/close1-protocol.mjs
+      - src/close1-strategy.mjs
+      - src/close1-trading.mjs
       - src/close1-worker.mjs
       - wrangler.close1.jsonc
       - wrangler.close1.bootstrap.jsonc
@@ -51,4 +53,3 @@ jobs:
         run: node --input-type=module -e 'const keys=["TECHNOCORE_AGENT_DID","TECHNOCORE_AGENT_PRIVATE_KEY"]; process.stdout.write(JSON.stringify(Object.fromEntries(keys.map((key)=>[key,process.env[key]]))))' | npx wrangler@4.35.0 secret bulk --config wrangler.close1.bootstrap.jsonc
       - name: Enable the one-minute close-1 schedule
         run: npx wrangler@4.35.0 deploy --config wrangler.close1.jsonc
-
