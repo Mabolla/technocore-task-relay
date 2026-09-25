@@ -342,7 +342,7 @@ test("posts one capped maker offer with two sweeps for counterparties to settle"
   assert.match(posted[3].text, /close1\.offer\.visible\.v1/);
 });
 
-test("refreshes owner proof while a visible maker offer remains active", async () => {
+test("refreshes the owner and exact offer while a maker lease remains active", async () => {
   const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
   const privateKey = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64");
   const posted = [];
@@ -369,15 +369,19 @@ test("refreshes owner proof while a visible maker offer remains active", async (
     action: "waiting-offer",
     tradeId: "mb112l280fb60bc4f8",
     position: 0,
-    ownerSeq: 901
+    ownerSeq: 901,
+    publicSeq: 901
   });
-  assert.equal(posted.length, 1);
+  assert.equal(posted.length, 2);
   assert.equal(posted[0].room, "close1");
   assert.deepEqual(JSON.parse(posted[0].text), {
     t: "owner",
     season: "close-1",
     key: CLOSE1_AGENT_DID
   });
+  assert.equal(posted[1].room, "close1");
+  assert.equal(posted[1].text, ACTIVE_OFFER.text);
+  assert.ok(Number(posted[1].nonce) > Number(posted[0].nonce));
 });
 
 test("countersigns one verified owner offer and posts it only in the registered journal", async () => {
