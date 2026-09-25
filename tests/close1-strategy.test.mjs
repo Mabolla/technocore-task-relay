@@ -96,7 +96,7 @@ test("holds until NVDA underperforms the benchmark by five points", () => {
   assert.equal(result.metrics.currentTop3Score, "89.32");
 });
 
-test("creates a full-collateral long plan only for validated relative-value reversion", () => {
+test("creates a half-balance long plan only for validated relative-value reversion", () => {
   const { nvda, benchmark } = candidateSeries();
   const result = analyzeClose1Market(
     candlesFrom(nvda),
@@ -109,8 +109,8 @@ test("creates a full-collateral long plan only for validated relative-value reve
   assert.equal(result.direction, "long");
   assert.ok(result.metrics.relativeGap168hPct <= -5);
   assert.ok(result.metrics.nvdaReturn672hPct > 0);
-  assert.equal(result.riskPlan.allocation, 1);
-  assert.ok(Number(result.riskPlan.notional) <= 10_000);
+  assert.equal(result.riskPlan.allocation, 0.5);
+  assert.ok(Number(result.riskPlan.notional) <= 5_000);
   assert.ok(Number(result.riskPlan.beatCurrentTop3Final) > nvda.at(-1));
 });
 
@@ -166,6 +166,6 @@ test("blocks divergent prices, insufficient alignment, and allocations over the 
     side: "long",
     entryPrice: "225",
     targetScore: "89.32",
-    allocation: 1.01
+    allocation: 0.51
   }), /risk cap/);
 });
