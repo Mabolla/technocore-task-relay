@@ -2,7 +2,10 @@ const DEFAULT_BASE_URL = "https://technocore.chat";
 
 export const CLOSE1_SEASON = "close-1";
 export const CLOSE1_TRADING_ROOM = "close1";
-export const CLOSE1_CONTROL_ROOM = "mabolla-close1";
+// Technocore reached its global room cap before close-1 opened. Reuse Mabolla's
+// existing signed coordination room only as a durable receipt journal; contest
+// registrations and trades still go exclusively to registered trading rooms.
+export const CLOSE1_CONTROL_ROOM = "mabolla-task-relay";
 export const CLOSE1_AGENT_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 export const CLOSE1_REFEREE_DID = "did:key:z6MkowHQwsx9xr84WbWN3YCnKutyBnBXkT1ChKY4uEAAMzte";
 export const CLOSE1_MANIFEST_SHA256 = "bae09812e25eb6f1369c611f24964f7ea0acafddfc45301a16f33f941296dafa";
