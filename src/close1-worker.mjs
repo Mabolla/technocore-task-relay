@@ -1,4 +1,4 @@
-import { CLOSE1_AGENT_DID, observeClose1 } from "./close1-protocol.mjs";
+import { CLOSE1_AGENT_DID, advanceClose1RoomRegistration, observeClose1 } from "./close1-protocol.mjs";
 
 export default {
   async scheduled(_controller, env) {
@@ -10,7 +10,14 @@ export default {
       console.error(JSON.stringify({ service: "mabolla-close1-agent", ...result }));
       return;
     }
-    console.log(JSON.stringify({ service: "mabolla-close1-agent", did: CLOSE1_AGENT_DID, ...result }));
+    let roomRegistration;
+    try {
+      roomRegistration = await advanceClose1RoomRegistration(env, result);
+    } catch (error) {
+      roomRegistration = { action: "error", error: String(error?.message || error) };
+      console.error(JSON.stringify({ service: "mabolla-close1-agent", phase: "room-registration", ...roomRegistration }));
+    }
+    console.log(JSON.stringify({ service: "mabolla-close1-agent", did: CLOSE1_AGENT_DID, ...result, roomRegistration }));
   },
 
   async fetch(_request, env) {
@@ -29,4 +36,3 @@ export default {
     }, { headers: { "cache-control": "no-store" } });
   }
 };
-
