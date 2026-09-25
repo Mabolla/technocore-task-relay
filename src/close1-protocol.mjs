@@ -12,6 +12,7 @@ export const CLOSE1_MANIFEST_SHA256 = "bae09812e25eb6f1369c611f24964f7ea0acafddf
 export const CLOSE1_LOCK_SWEEP = 2556;
 export const CLOSE1_LOCK_AT = "2026-10-04T09:00:00.000Z";
 export const CLOSE1_REGISTRATION_REQUEST_ID = "mabolla-close1-owner-v1";
+export const CLOSE1_ROOM_REQUEST_ID = "mabolla-close1-room-v1";
 
 export const CLOSE1_REFEREE_ROOMS = Object.freeze([
   "d-close1-flow",
@@ -86,6 +87,10 @@ function requireIdentity(env) {
 
 export function close1OwnerText(did = CLOSE1_AGENT_DID) {
   return JSON.stringify({ t: "owner", season: CLOSE1_SEASON, key: did });
+}
+
+export function close1RoomText(room = CLOSE1_CONTROL_ROOM) {
+  return JSON.stringify({ t: "room", season: CLOSE1_SEASON, room });
 }
 
 export async function verifySignedRecord(room, record, expectedDid) {
@@ -221,6 +226,27 @@ async function verifiedJournalEntries(records) {
   return entries;
 }
 
+async function verifiedOwnerReceipt(journal) {
+  for (const entry of journal) {
+    const body = entry.body;
+    if (body?.type !== "close1.registration.receipt.v1"
+      || body?.request_id !== CLOSE1_REGISTRATION_REQUEST_ID
+      || body?.registration_room !== CLOSE1_TRADING_ROOM
+      || !Number.isSafeInteger(body?.registration_seq)
+      || !Number.isSafeInteger(body?.observed_sweep)
+      || !/^\d+$/.test(body?.registration_nonce || "")
+      || !/^[A-Za-z0-9_-]{86}$/.test(body?.registration_sig || "")) continue;
+    const registration = {
+      from: CLOSE1_AGENT_DID,
+      nonce: body.registration_nonce,
+      text: close1OwnerText(),
+      sig: body.registration_sig
+    };
+    if (await verifySignedRecord(CLOSE1_TRADING_ROOM, registration, CLOSE1_AGENT_DID).catch(() => false)) return entry;
+  }
+  return null;
+}
+
 async function latestVerifiedPrice(baseUrl, fetchImpl, now) {
   const payload = await readJson(`${baseUrl}/r/d-close1-price?limit=8&format=json&n=${now}`, fetchImpl);
   const verified = [];
@@ -245,27 +271,7 @@ export async function registerClose1Owner(env, options = {}) {
   const fetchImpl = options.fetch || fetch;
   const baseUrl = env.TECHNOCORE_URL || DEFAULT_BASE_URL;
   const journal = await verifiedJournalEntries(await readControlExport(baseUrl, fetchImpl, now));
-  let receipt;
-  for (const entry of journal) {
-    const body = entry.body;
-    if (body?.type !== "close1.registration.receipt.v1"
-      || body?.request_id !== CLOSE1_REGISTRATION_REQUEST_ID
-      || body?.registration_room !== CLOSE1_TRADING_ROOM
-      || !Number.isSafeInteger(body?.registration_seq)
-      || !Number.isSafeInteger(body?.observed_sweep)
-      || !/^\d+$/.test(body?.registration_nonce || "")
-      || !/^[A-Za-z0-9_-]{86}$/.test(body?.registration_sig || "")) continue;
-    const registration = {
-      from: CLOSE1_AGENT_DID,
-      nonce: body.registration_nonce,
-      text: close1OwnerText(),
-      sig: body.registration_sig
-    };
-    if (await verifySignedRecord(CLOSE1_TRADING_ROOM, registration, CLOSE1_AGENT_DID).catch(() => false)) {
-      receipt = entry;
-      break;
-    }
-  }
+  const receipt = await verifiedOwnerReceipt(journal);
   if (receipt) {
     return {
       action: "already-registered",
@@ -317,6 +323,169 @@ export async function registerClose1Owner(env, options = {}) {
     journalIntentSeq: Number(intent.seq),
     journalReceiptSeq: Number(journalReceipt.seq),
     observedSweep: price.body.n
+  };
+}
+
+function roomIntentText(observedSweep) {
+  return JSON.stringify({
+    type: "close1.room.intent.v1",
+    season: CLOSE1_SEASON,
+    did: CLOSE1_AGENT_DID,
+    room: CLOSE1_CONTROL_ROOM,
+    observed_sweep: observedSweep,
+    request_id: CLOSE1_ROOM_REQUEST_ID
+  });
+}
+
+function roomReceiptText(registration, observedSweep) {
+  return JSON.stringify({
+    type: "close1.room.receipt.v1",
+    season: CLOSE1_SEASON,
+    did: CLOSE1_AGENT_DID,
+    room: CLOSE1_CONTROL_ROOM,
+    observed_sweep: observedSweep,
+    registration_seq: Number(registration.seq),
+    registration_nonce: String(registration.nonce),
+    registration_sig: registration.sig,
+    request_id: CLOSE1_ROOM_REQUEST_ID
+  });
+}
+
+function roomReadyText(receipt, acceptedSweep, flowFile) {
+  return JSON.stringify({
+    type: "close1.room.ready.v1",
+    season: CLOSE1_SEASON,
+    did: CLOSE1_AGENT_DID,
+    room: CLOSE1_CONTROL_ROOM,
+    registration_seq: receipt.body.registration_seq,
+    accepted_sweep: acceptedSweep,
+    flow_file: flowFile,
+    request_id: CLOSE1_ROOM_REQUEST_ID
+  });
+}
+
+async function verifiedRoomReceipt(journal) {
+  for (const entry of journal) {
+    const body = entry.body;
+    if (body?.type !== "close1.room.receipt.v1"
+      || body?.request_id !== CLOSE1_ROOM_REQUEST_ID
+      || body?.room !== CLOSE1_CONTROL_ROOM
+      || !Number.isSafeInteger(body?.registration_seq)
+      || !Number.isSafeInteger(body?.observed_sweep)
+      || !/^\d+$/.test(body?.registration_nonce || "")
+      || !/^[A-Za-z0-9_-]{86}$/.test(body?.registration_sig || "")) continue;
+    const registration = {
+      from: CLOSE1_AGENT_DID,
+      nonce: body.registration_nonce,
+      text: close1RoomText(),
+      sig: body.registration_sig
+    };
+    if (await verifySignedRecord(CLOSE1_TRADING_ROOM, registration, CLOSE1_AGENT_DID).catch(() => false)) return entry;
+  }
+  return null;
+}
+
+async function latestVerifiedFlow(baseUrl, fetchImpl, now) {
+  const payload = await readJson(`${baseUrl}/r/d-close1-flow?limit=8&format=json&n=${now}`, fetchImpl);
+  const verified = [];
+  for (const record of payload?.messages || []) {
+    if (!await verifySignedRecord("d-close1-flow", record, CLOSE1_REFEREE_DID).catch(() => false)) continue;
+    const body = parseRefereeMessage("d-close1-flow", record);
+    if (body) verified.push({ record, body });
+  }
+  return verified.sort((left, right) => left.body.n - right.body.n);
+}
+
+export async function advanceClose1RoomRegistration(env, snapshot, options = {}) {
+  requireIdentity(env);
+  if (String(env.CLOSE1_ROOM_REGISTRATION_ENABLED || "").toLowerCase() !== "true") return { action: "disabled" };
+  if (!await verifyPinnedSeed()) throw new Error("Pinned close-1 seed verification failed");
+  if (snapshot?.action !== "healthy" || !Number.isSafeInteger(snapshot?.sweep)) {
+    return { action: "blocked", reason: "unhealthy-signed-snapshot" };
+  }
+
+  const now = Number(options.now || Date.now());
+  const fetchImpl = options.fetch || fetch;
+  const baseUrl = env.TECHNOCORE_URL || DEFAULT_BASE_URL;
+  const journal = await verifiedJournalEntries(await readControlExport(baseUrl, fetchImpl, now));
+  const ownerReceipt = await verifiedOwnerReceipt(journal);
+  if (!ownerReceipt) return { action: "blocked", reason: "missing-owner-receipt" };
+  const alreadyReady = journal.find(({ body }) =>
+    body?.type === "close1.room.ready.v1"
+      && body?.request_id === CLOSE1_ROOM_REQUEST_ID
+      && body?.room === CLOSE1_CONTROL_ROOM
+      && Number.isSafeInteger(body?.accepted_sweep)
+      && /^[a-f0-9]{64}$/.test(body?.flow_file || "")
+  );
+  if (alreadyReady) return { action: "ready", acceptedSweep: alreadyReady.body.accepted_sweep };
+
+  const roomReceipt = await verifiedRoomReceipt(journal);
+  const flows = await latestVerifiedFlow(baseUrl, fetchImpl, now);
+  if (roomReceipt) {
+    const accepted = flows.find(({ body }) =>
+      body.n > roomReceipt.body.observed_sweep
+        && Array.isArray(body.rooms)
+        && body.rooms.includes(CLOSE1_CONTROL_ROOM)
+    );
+    if (accepted) {
+      const nonce = Math.max(Math.trunc(now), Number(roomReceipt.record.nonce) + 1);
+      const ready = await publishSignedRecord(
+        CLOSE1_CONTROL_ROOM,
+        roomReadyText(roomReceipt, accepted.body.n, accepted.body.file),
+        env,
+        fetchImpl,
+        nonce
+      );
+      return { action: "ready", acceptedSweep: accepted.body.n, journalSeq: Number(ready.seq) };
+    }
+    if (snapshot.sweep > roomReceipt.body.observed_sweep + 4) {
+      return { action: "blocked", reason: "room-not-listed", submittedSweep: roomReceipt.body.observed_sweep };
+    }
+    return { action: "waiting-for-room", submittedSweep: roomReceipt.body.observed_sweep };
+  }
+
+  const unresolved = journal.find(({ body }) =>
+    body?.type === "close1.room.intent.v1"
+      && body?.request_id === CLOSE1_ROOM_REQUEST_ID
+  );
+  if (unresolved) return { action: "blocked", reason: "unresolved-room-intent" };
+
+  // The owner post may land just after the observed sweep closes. Waiting two
+  // signed sweeps guarantees the owner mint has had a full referee interval.
+  if (snapshot.sweep < ownerReceipt.body.observed_sweep + 2) {
+    return { action: "waiting-for-mint", observedSweep: ownerReceipt.body.observed_sweep };
+  }
+
+  let nonce = Math.trunc(now);
+  const intent = await publishSignedRecord(
+    CLOSE1_CONTROL_ROOM,
+    roomIntentText(snapshot.sweep),
+    env,
+    fetchImpl,
+    nonce
+  );
+  nonce = Math.max(nonce + 1, Date.now());
+  const registration = await publishSignedRecord(
+    CLOSE1_TRADING_ROOM,
+    close1RoomText(),
+    env,
+    fetchImpl,
+    nonce
+  );
+  nonce = Math.max(nonce + 1, Date.now());
+  const receipt = await publishSignedRecord(
+    CLOSE1_CONTROL_ROOM,
+    roomReceiptText(registration, snapshot.sweep),
+    env,
+    fetchImpl,
+    nonce
+  );
+  return {
+    action: "room-submitted",
+    registrationSeq: Number(registration.seq),
+    journalIntentSeq: Number(intent.seq),
+    journalReceiptSeq: Number(receipt.seq),
+    observedSweep: snapshot.sweep
   };
 }
 
