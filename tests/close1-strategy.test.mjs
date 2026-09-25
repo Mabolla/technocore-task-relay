@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 import {
   CLOSE1_BENCHMARK,
   CLOSE1_MARKET,
+  CLOSE1_STAGE_ONE_ALLOCATION,
+  CLOSE1_STAGE_ONE_ENTRY_HOURS,
   CLOSE1_TIME_BOXED_ENTRY_HOURS,
   HYPERLIQUID_INFO_URL,
   analyzeClose1Market,
@@ -121,6 +123,34 @@ test("creates a half-balance long plan only for validated relative-value reversi
   assert.equal(result.riskPlan.allocation, 0.5);
   assert.ok(Number(result.riskPlan.notional) <= 5_000);
   assert.ok(Number(result.riskPlan.beatCurrentTop3Final) > nvda.at(-1));
+});
+
+test("starts with a quarter-balance long before the hard fallback", () => {
+  const stageNow = Date.parse("2026-09-25T19:00:00Z");
+  const shift = stageNow - NOW;
+  const nvda = Array.from({ length: 720 }, (_, index) => 220 + index * 0.01);
+  const benchmark = Array.from({ length: 720 }, (_, index) => 30_000 + index * 1.4);
+  const nvdaCandles = candlesFrom(nvda);
+  const benchmarkCandles = candlesFrom(benchmark, CLOSE1_BENCHMARK);
+  for (const candle of [...nvdaCandles, ...benchmarkCandles]) {
+    candle.t += shift;
+    candle.T += shift;
+  }
+
+  const result = analyzeClose1Market(
+    nvdaCandles,
+    benchmarkCandles,
+    snapshot(nvda.at(-1).toFixed(2)),
+    stageNow
+  );
+
+  assert.equal(result.action, "candidate");
+  assert.equal(result.reason, "staged-long-entry");
+  assert.equal(result.direction, "long");
+  assert.equal(result.metrics.remainingHours, CLOSE1_STAGE_ONE_ENTRY_HOURS);
+  assert.ok(result.metrics.relativeGap168hPct > -5);
+  assert.equal(result.riskPlan.allocation, CLOSE1_STAGE_ONE_ALLOCATION);
+  assert.ok(Number(result.riskPlan.notional) <= 2_500);
 });
 
 test("guarantees a time-boxed long candidate if the rare primary signal never arrives", () => {
