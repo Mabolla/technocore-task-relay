@@ -24,6 +24,7 @@ const MAX_PRICE_SLIPPAGE = 0.0025;
 const MAX_INITIAL_NOTIONAL = 5_000;
 const OUTCOME_LOOKBACK = 200;
 const MAKER_OFFER_LIFETIME_SWEEPS = 2;
+export const CLOSE1_PROFIT_LOCK_PCT = 3;
 
 function positiveAmount(value) {
   if (typeof value !== "string" || !AMOUNT.test(value)) return null;
@@ -351,6 +352,43 @@ function positionFrom(actions, outcomes) {
   return Math.round(position * 100) / 100;
 }
 
+export function close1ProfitLockPlan(actions, outcomes, position, reference) {
+  const mark = Number(reference);
+  if (!Array.isArray(actions) || !(outcomes instanceof Map) || !Number.isFinite(mark) || mark <= 0) {
+    return { action: "blocked", reason: "invalid-profit-lock-input" };
+  }
+  const settled = actions.filter((action) => outcomes.get(action?.body?.terms?.id)?.outcome === "settled");
+  if (settled.some((action) => action.direction === "short")) {
+    return { action: "closed", reason: "profit-lock-complete" };
+  }
+  if (!Number.isFinite(position) || position <= 0) return { action: "hold", reason: "no-long-position" };
+  const longs = settled.filter((action) => action.direction === "long");
+  const quantity = longs.reduce((total, action) => total + Number(action.body.terms.qty), 0);
+  const notional = longs.reduce((total, action) =>
+    total + Number(action.body.terms.qty) * Number(action.body.terms.px), 0);
+  if (!Number.isFinite(quantity) || !Number.isFinite(notional) || quantity <= 0
+    || Math.abs(quantity - position) > 0.011) {
+    return { action: "blocked", reason: "unreconciled-profit-lock-position" };
+  }
+  const averageEntry = notional / quantity;
+  const triggerPrice = Math.ceil((averageEntry * (1 + CLOSE1_PROFIT_LOCK_PCT / 100) - Number.EPSILON) * 100) / 100;
+  if (mark + 1e-9 < triggerPrice) {
+    return {
+      action: "hold",
+      reason: "profit-lock-not-reached",
+      averageEntry: fixed2(averageEntry),
+      triggerPrice: fixed2(triggerPrice)
+    };
+  }
+  return {
+    action: "close",
+    reason: "three-percent-profit-lock",
+    quantity: fixed2(position),
+    averageEntry: fixed2(averageEntry),
+    triggerPrice: fixed2(triggerPrice)
+  };
+}
+
 function makeOfferTerms(snapshot, direction, quantity) {
   const suffix = direction === "long" ? "l" : "s";
   const random = new Uint8Array(6);
@@ -399,6 +437,40 @@ export async function advanceClose1Trading(env, snapshot, strategy, roomRegistra
   }
   const pendingTrade = ledger.unresolved.find((action) => action.role === "taker");
   if (pendingTrade) return { action: "waiting-trade", tradeId: pendingTrade.body.terms.id, position };
+
+  const profitLock = close1ProfitLockPlan(ledger.actions, ledger.outcomes, position, snapshot.reference);
+  if (profitLock.action === "blocked") {
+    return { action: "blocked", reason: profitLock.reason, position };
+  }
+  if (profitLock.action === "closed") {
+    return { action: "hold", reason: profitLock.reason, position };
+  }
+  if (profitLock.action === "close") {
+    const terms = makeOfferTerms(snapshot, "short", position);
+    const termsText = canonicalClose1Terms(terms);
+    const makerSig = await signClose1Payload(`close-1|terms|${termsText}`, env);
+    const offerText = JSON.stringify({ t: "offer", season: CLOSE1_SEASON, terms, maker_sig: makerSig });
+    const journalRecord = await publishSignedRecord(CLOSE1_CONTROL_ROOM, offerText, env, fetchImpl, Math.trunc(now));
+    const visibility = await publishOfferVisibility(
+      { record: journalRecord, body: JSON.parse(offerText) },
+      env,
+      fetchImpl,
+      Math.max(Math.trunc(now) + 1, Number(journalRecord.nonce) + 1)
+    );
+    return {
+      action: "profit-lock-offer-posted",
+      role: "maker",
+      tradeId: terms.id,
+      direction: "short",
+      qty: terms.qty,
+      px: terms.px,
+      until: terms.until,
+      position,
+      averageEntry: profitLock.averageEntry,
+      triggerPrice: profitLock.triggerPrice,
+      ...visibility
+    };
+  }
   if (strategy?.action !== "candidate") {
     return { action: "hold", reason: strategy?.reason || "no-strategy-candidate", position };
   }

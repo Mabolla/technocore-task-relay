@@ -8,6 +8,7 @@ import {
 import {
   advanceClose1Trading,
   canonicalClose1Terms,
+  close1ProfitLockPlan,
   selectClose1Offer,
   verifyClose1Offer
 } from "../src/close1-trading.mjs";
@@ -154,6 +155,37 @@ test("selects price-compatible offers without exceeding the remaining cap", asyn
     remainingNotional: 100,
     knownIds: new Set()
   }), null);
+});
+
+test("locks a settled long only after a three-percent move and never reopens a closed cycle", () => {
+  const long = {
+    direction: "long",
+    body: { terms: { id: "long-1", qty: "11.01", px: "224.71" } }
+  };
+  const outcomes = new Map([["long-1", { outcome: "settled" }]]);
+  assert.deepEqual(close1ProfitLockPlan([long], outcomes, 11.01, "231.45"), {
+    action: "hold",
+    reason: "profit-lock-not-reached",
+    averageEntry: "224.71",
+    triggerPrice: "231.46"
+  });
+  assert.deepEqual(close1ProfitLockPlan([long], outcomes, 11.01, "231.46"), {
+    action: "close",
+    reason: "three-percent-profit-lock",
+    quantity: "11.01",
+    averageEntry: "224.71",
+    triggerPrice: "231.46"
+  });
+
+  const close = {
+    direction: "short",
+    body: { terms: { id: "close-1", qty: "11.01", px: "231.45" } }
+  };
+  outcomes.set("close-1", { outcome: "settled" });
+  assert.deepEqual(close1ProfitLockPlan([long, close], outcomes, 0, "240.00"), {
+    action: "closed",
+    reason: "profit-lock-complete"
+  });
 });
 
 test("trading stays disabled or holds without any write", async () => {
