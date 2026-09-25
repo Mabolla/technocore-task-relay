@@ -24,8 +24,7 @@ const MAX_PRICE_SLIPPAGE = 0.0025;
 const MAX_INITIAL_NOTIONAL = 5_000;
 const OUTCOME_LOOKBACK = 200;
 const MAKER_OFFER_LIFETIME_SWEEPS = 2;
-export const CLOSE1_PROFIT_LOCK_PCT = 5;
-export const CLOSE1_PROFIT_LOCK_SCORE_BUFFER = 10;
+export const CLOSE1_PROFIT_LOCK_PCT = 3;
 
 function positiveAmount(value) {
   if (typeof value !== "string" || !AMOUNT.test(value)) return null;
@@ -353,11 +352,9 @@ function positionFrom(actions, outcomes) {
   return Math.round(position * 100) / 100;
 }
 
-export function close1ProfitLockPlan(actions, outcomes, position, reference, currentTop3Score = 0) {
+export function close1ProfitLockPlan(actions, outcomes, position, reference) {
   const mark = Number(reference);
-  const boardScore = Number(currentTop3Score);
-  if (!Array.isArray(actions) || !(outcomes instanceof Map) || !Number.isFinite(mark) || mark <= 0
-    || !Number.isFinite(boardScore) || boardScore < 0) {
+  if (!Array.isArray(actions) || !(outcomes instanceof Map) || !Number.isFinite(mark) || mark <= 0) {
     return { action: "blocked", reason: "invalid-profit-lock-input" };
   }
   const settled = actions.filter((action) => outcomes.get(action?.body?.terms?.id)?.outcome === "settled");
@@ -374,26 +371,21 @@ export function close1ProfitLockPlan(actions, outcomes, position, reference, cur
     return { action: "blocked", reason: "unreconciled-profit-lock-position" };
   }
   const averageEntry = notional / quantity;
-  const scoreTarget = boardScore + CLOSE1_PROFIT_LOCK_SCORE_BUFFER;
-  const minimumPrice = averageEntry * (1 + CLOSE1_PROFIT_LOCK_PCT / 100);
-  const competitivePrice = (scoreTarget / quantity + averageEntry * 1.01) / 0.99;
-  const triggerPrice = Math.ceil((Math.max(minimumPrice, competitivePrice) - Number.EPSILON) * 100) / 100;
+  const triggerPrice = Math.ceil((averageEntry * (1 + CLOSE1_PROFIT_LOCK_PCT / 100) - Number.EPSILON) * 100) / 100;
   if (mark + 1e-9 < triggerPrice) {
     return {
       action: "hold",
       reason: "profit-lock-not-reached",
       averageEntry: fixed2(averageEntry),
-      triggerPrice: fixed2(triggerPrice),
-      scoreTarget: fixed2(scoreTarget)
+      triggerPrice: fixed2(triggerPrice)
     };
   }
   return {
     action: "close",
-    reason: "competitive-profit-lock",
+    reason: "three-percent-profit-lock",
     quantity: fixed2(position),
     averageEntry: fixed2(averageEntry),
-    triggerPrice: fixed2(triggerPrice),
-    scoreTarget: fixed2(scoreTarget)
+    triggerPrice: fixed2(triggerPrice)
   };
 }
 
@@ -446,14 +438,11 @@ export async function advanceClose1Trading(env, snapshot, strategy, roomRegistra
   const pendingTrade = ledger.unresolved.find((action) => action.role === "taker");
   if (pendingTrade) return { action: "waiting-trade", tradeId: pendingTrade.body.terms.id, position };
 
-  const board = Array.isArray(snapshot.leaderboard) ? snapshot.leaderboard : [];
-  const currentTop3Score = Number(board[Math.min(2, board.length - 1)]?.[1] ?? 0);
   const profitLock = close1ProfitLockPlan(
     ledger.actions,
     ledger.outcomes,
     position,
-    snapshot.reference,
-    currentTop3Score
+    snapshot.reference
   );
   if (profitLock.action === "blocked") {
     return { action: "blocked", reason: profitLock.reason, position };
