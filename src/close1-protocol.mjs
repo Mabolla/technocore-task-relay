@@ -2,7 +2,7 @@ const DEFAULT_BASE_URL = "https://technocore.chat";
 
 export const CLOSE1_SEASON = "close-1";
 export const CLOSE1_TRADING_ROOM = "close1";
-export const CLOSE1_CONTROL_ROOM = "mabolla-close1-control";
+export const CLOSE1_CONTROL_ROOM = "mabolla-close1";
 export const CLOSE1_AGENT_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 export const CLOSE1_REFEREE_DID = "did:key:z6MkowHQwsx9xr84WbWN3YCnKutyBnBXkT1ChKY4uEAAMzte";
 export const CLOSE1_MANIFEST_SHA256 = "bae09812e25eb6f1369c611f24964f7ea0acafddfc45301a16f33f941296dafa";
@@ -159,8 +159,11 @@ async function publishSignedRecord(room, text, env, fetchImpl, nonceValue) {
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify({ did: CLOSE1_AGENT_DID, sig, nonce, text })
   });
-  if (!response.ok) throw new Error(`Technocore publish failed: ${response.status}`);
-  await response.text();
+  const responseText = await response.text();
+  if (!response.ok) {
+    const detail = responseText.replace(/\s+/g, " ").trim().slice(0, 160);
+    throw new Error(`Technocore publish failed: ${response.status}${detail ? ` (${detail})` : ""}`);
+  }
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const confirmation = await readJson(

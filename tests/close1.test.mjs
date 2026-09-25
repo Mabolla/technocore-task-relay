@@ -143,7 +143,7 @@ test("registers once through an intent and signed receipt journal", async () => 
   let sequence = 800;
   const fetchMock = async (url, init = {}) => {
     const target = String(url);
-    if (target.includes("/mabolla-close1-control/export")) return new Response("", { status: 404 });
+    if (target.includes("/mabolla-close1/export")) return new Response("", { status: 404 });
     if (target.includes("/d-close1-price?")) return Response.json({ messages: [SWEEP_ONE["d-close1-price"]] });
     if (init.method === "POST") {
       const body = JSON.parse(init.body);
@@ -166,7 +166,7 @@ test("registers once through an intent and signed receipt journal", async () => 
   assert.equal(result.action, "registered");
   assert.equal(result.registrationSeq, 802);
   assert.equal(result.observedSweep, 1);
-  assert.deepEqual(posted.map(({ room }) => room), ["mabolla-close1-control", "close1", "mabolla-close1-control"]);
+  assert.deepEqual(posted.map(({ room }) => room), ["mabolla-close1", "close1", "mabolla-close1"]);
   assert.equal(posted[1].text, close1OwnerText());
   assert.match(posted[0].text, /close1\.registration\.intent\.v1/);
   assert.match(posted[2].text, /close1\.registration\.receipt\.v1/);
