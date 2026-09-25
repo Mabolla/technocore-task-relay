@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mabolla-close1-agent",
+  "main": "src/close1-worker.mjs",
+  "compatibility_date": "2026-09-25",
+  "workers_dev": false,
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  "vars": {
+    "TECHNOCORE_URL": "https://technocore.chat",
+    "CLOSE1_TRADING_ENABLED": "false"
+  }
+}
+
