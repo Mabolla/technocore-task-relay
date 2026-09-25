@@ -7,6 +7,8 @@ export const CLOSE1_FINAL_AT = "2026-10-04T10:00:00.000Z";
 export const CLOSE1_STARTING_BALANCE = 10_000;
 export const CLOSE1_FEE_RATE = 0.01;
 export const CLOSE1_MAX_ALLOCATION = 0.5;
+export const CLOSE1_STAGE_ONE_ALLOCATION = 0.25;
+export const CLOSE1_STAGE_ONE_ENTRY_HOURS = 207;
 export const CLOSE1_TIME_BOXED_ENTRY_HOURS = 192;
 
 const MIN_CANDLE_HISTORY = 700;
@@ -181,8 +183,9 @@ export function analyzeClose1Market(nvdaCandles, benchmarkCandles, snapshot, now
     return { action: "hold", reason: "outside-validated-entry-window", sweep: snapshot.sweep, metrics };
   }
   const primarySignal = nvdaRegimeReturn > 0 && relativeGap <= RELATIVE_GAP_PCT;
+  const stagedEntry = remainingHours <= CLOSE1_STAGE_ONE_ENTRY_HOURS;
   const timeBoxedFallback = remainingHours <= CLOSE1_TIME_BOXED_ENTRY_HOURS;
-  if (!primarySignal && !timeBoxedFallback) {
+  if (!primarySignal && !stagedEntry) {
     const reason = nvdaRegimeReturn <= 0
       ? "long-regime-not-positive"
       : "relative-gap-not-wide-enough";
@@ -190,7 +193,11 @@ export function analyzeClose1Market(nvdaCandles, benchmarkCandles, snapshot, now
   }
   return {
     action: "candidate",
-    reason: primarySignal ? "validated-relative-value-reversion" : "time-boxed-long-fallback",
+    reason: primarySignal
+      ? "validated-relative-value-reversion"
+      : timeBoxedFallback
+        ? "time-boxed-long-fallback"
+        : "staged-long-entry",
     sweep: snapshot.sweep,
     direction: "long",
     metrics,
@@ -198,7 +205,9 @@ export function analyzeClose1Market(nvdaCandles, benchmarkCandles, snapshot, now
       side: "long",
       entryPrice: signedReference,
       targetScore,
-      allocation: CLOSE1_MAX_ALLOCATION
+      allocation: primarySignal || timeBoxedFallback
+        ? CLOSE1_MAX_ALLOCATION
+        : CLOSE1_STAGE_ONE_ALLOCATION
     })
   };
 }
