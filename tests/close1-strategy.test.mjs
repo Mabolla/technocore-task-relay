@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   CLOSE1_BENCHMARK,
@@ -15,6 +16,13 @@ import {
 
 const NOW = Date.parse("2026-09-25T17:00:00Z");
 const HOUR_MS = 60 * 60 * 1000;
+
+test("deploy watches every Close-1 runtime strategy module", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/deploy-close1.yml", import.meta.url), "utf8");
+  for (const path of ["src/close1-protocol.mjs", "src/close1-strategy.mjs", "src/close1-trading.mjs", "src/close1-worker.mjs"]) {
+    assert.match(workflow, new RegExp(`- ${path.replaceAll(".", "\\.")}`));
+  }
+});
 
 function candlesFrom(closes, market = CLOSE1_MARKET) {
   return closes.map((close, index) => ({
