@@ -119,6 +119,7 @@ test("observes a fully signed common referee sweep", async () => {
     owners: 0,
     rooms: 1,
     mark: "226.14",
+    leaderboard: [],
     tradingEnabled: false
   });
 });
