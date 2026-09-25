@@ -9,6 +9,7 @@ import {
   advanceClose1Trading,
   canonicalClose1Terms,
   close1ProfitLockPlan,
+  close1SecondTrancheEntryGuard,
   selectClose1Offer,
   verifyClose1Offer
 } from "../src/close1-trading.mjs";
@@ -185,6 +186,68 @@ test("locks a settled long at a three-percent price gain regardless of leaderboa
   assert.deepEqual(close1ProfitLockPlan([long, close], outcomes, 0, "240.00"), {
     action: "closed",
     reason: "profit-lock-complete"
+  });
+});
+
+test("closes the second tranche at 230 and preserves the first tranche target", () => {
+  const first = {
+    record: { seq: 10 },
+    direction: "long",
+    body: { terms: { id: "first-long", qty: "11.01", px: "224.71" } }
+  };
+  const second = {
+    record: { seq: 20 },
+    direction: "long",
+    body: { terms: { id: "second-long", qty: "10.98", px: "225.08" } }
+  };
+  const secondExit = {
+    record: { seq: 30 },
+    direction: "short",
+    body: { terms: { id: "second-exit", qty: "10.98", px: "230.00" } }
+  };
+  const outcomes = new Map([
+    ["first-long", { outcome: "settled" }],
+    ["second-long", { outcome: "settled" }]
+  ]);
+
+  assert.deepEqual(close1ProfitLockPlan([first, second], outcomes, 21.99, "229.99"), {
+    action: "hold",
+    reason: "profit-lock-not-reached",
+    averageEntry: "224.89",
+    triggerPrice: "230.00"
+  });
+  assert.deepEqual(close1ProfitLockPlan([first, second], outcomes, 21.99, "230.00"), {
+    action: "close",
+    reason: "second-tranche-fixed-profit-lock",
+    quantity: "10.98",
+    averageEntry: "225.08",
+    triggerPrice: "230.00"
+  });
+
+  outcomes.set("second-exit", { outcome: "settled" });
+  assert.deepEqual(close1ProfitLockPlan([first, second, secondExit], outcomes, 11.01, "230.00"), {
+    action: "hold",
+    reason: "profit-lock-not-reached",
+    averageEntry: "224.71",
+    triggerPrice: "231.46",
+    reentryBlocked: true
+  });
+  assert.deepEqual(close1ProfitLockPlan([first, second, secondExit], outcomes, 11.01, "231.46"), {
+    action: "close",
+    reason: "three-percent-profit-lock",
+    quantity: "11.01",
+    averageEntry: "224.71",
+    triggerPrice: "231.46"
+  });
+});
+
+test("does not chase the second tranche above its profitable 230 exit cap", () => {
+  assert.deepEqual(close1SecondTrancheEntryGuard(11.01, 10.98, "225.40"), { action: "allow" });
+  assert.deepEqual(close1SecondTrancheEntryGuard(11.01, 10.98, "225.41"), {
+    action: "hold",
+    reason: "second-tranche-entry-above-profitable-cap",
+    entryCeiling: "225.40",
+    exitPrice: "230.00"
   });
 });
 
