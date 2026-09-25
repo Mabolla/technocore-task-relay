@@ -93,15 +93,24 @@ export function close1RoomText(room = CLOSE1_CONTROL_ROOM) {
   return JSON.stringify({ t: "room", season: CLOSE1_SEASON, room });
 }
 
+export async function verifyDidSignature(payload, signature, expectedDid) {
+  if (typeof payload !== "string" || !/^[A-Za-z0-9_-]{86}$/.test(String(signature || ""))) return false;
+  const decoded = base58Decode(expectedDid.replace(/^did:key:z/, ""));
+  if (decoded[0] !== 0xed || decoded[1] !== 0x01 || decoded.length !== 34) return false;
+  const key = await crypto.subtle.importKey("raw", decoded.slice(2), { name: "Ed25519" }, false, ["verify"]);
+  return crypto.subtle.verify(
+    "Ed25519",
+    key,
+    base64urlBytes(signature),
+    new TextEncoder().encode(payload)
+  );
+}
+
 export async function verifySignedRecord(room, record, expectedDid) {
   if (record?.from !== expectedDid || !record?.sig || record?.nonce === undefined || typeof record?.text !== "string") {
     return false;
   }
-  const decoded = base58Decode(expectedDid.replace(/^did:key:z/, ""));
-  if (decoded[0] !== 0xed || decoded[1] !== 0x01 || decoded.length !== 34) return false;
-  const key = await crypto.subtle.importKey("raw", decoded.slice(2), { name: "Ed25519" }, false, ["verify"]);
-  const signed = new TextEncoder().encode(`${room}|${record.nonce}|${record.text}`);
-  return crypto.subtle.verify("Ed25519", key, base64urlBytes(record.sig), signed);
+  return verifyDidSignature(`${room}|${record.nonce}|${record.text}`, record.sig, expectedDid);
 }
 
 async function signRecord(room, nonce, text, privateKeyBase64) {
@@ -114,6 +123,19 @@ async function signRecord(room, nonce, text, privateKeyBase64) {
   );
   const payload = new TextEncoder().encode(`${room}|${nonce}|${text}`);
   const signature = await crypto.subtle.sign("Ed25519", key, payload);
+  return bytesBase64url(new Uint8Array(signature));
+}
+
+export async function signClose1Payload(payload, env) {
+  requireIdentity(env);
+  const key = await crypto.subtle.importKey(
+    "pkcs8",
+    base64Bytes(env.TECHNOCORE_AGENT_PRIVATE_KEY),
+    { name: "Ed25519" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("Ed25519", key, new TextEncoder().encode(payload));
   return bytesBase64url(new Uint8Array(signature));
 }
 
@@ -157,7 +179,7 @@ async function readControlExport(baseUrl, fetchImpl, now) {
   });
 }
 
-async function publishSignedRecord(room, text, env, fetchImpl, nonceValue) {
+export async function publishSignedRecord(room, text, env, fetchImpl, nonceValue) {
   requireIdentity(env);
   const nonce = String(nonceValue);
   const sig = await signRecord(room, nonce, text, env.TECHNOCORE_AGENT_PRIVATE_KEY);
