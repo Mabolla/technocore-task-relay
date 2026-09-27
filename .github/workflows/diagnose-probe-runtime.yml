@@ -11,57 +11,57 @@ permissions:
   contents: read
 
 jobs:
-  tail:
-    strategy:
-      fail-fast: false
-      matrix:
-        worker: [mabolla-close1-agent, mabolla-technocore-probe-listener]
+  metrics:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - name: Collect two minutes of Worker outcomes
+      - name: Query recent Worker invocation metrics
         shell: bash
         run: |
-          status=0
-          timeout 125s npx wrangler@4.35.0 tail '${{ matrix.worker }}' --format=json > worker-tail.jsonl || status=$?
-          if [[ "$status" -ne 0 && "$status" -ne 124 ]]; then
-            exit "$status"
-          fi
           node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs';
-          const lines = readFileSync('worker-tail.jsonl', 'utf8').split(/\r?\n/).filter(Boolean);
-          const events = [];
-          for (const line of lines) {
-            try {
-              const value = JSON.parse(line);
-              if (typeof value.outcome === 'string') events.push(value);
-            } catch { /* Wrangler may emit status lines before events. */ }
+          const since = new Date(Date.now() - 3 * 60_000).toISOString();
+          const until = new Date().toISOString();
+          const query = `query GetWorkersAnalytics($accountTag: string, $datetimeStart: string, $datetimeEnd: string, $scriptName: string) {
+            viewer { accounts(filter: {accountTag: $accountTag}) {
+              workersInvocationsAdaptive(limit: 100, filter: {
+                scriptName: $scriptName, datetime_geq: $datetimeStart, datetime_leq: $datetimeEnd
+              }) {
+                sum { requests errors }
+                quantiles { cpuTimeP50 cpuTimeP99 }
+                dimensions { datetime scriptName status }
+              }
+            } }
+          }`;
+          let failed = false;
+          for (const scriptName of ['mabolla-close1-agent', 'mabolla-technocore-probe-listener']) {
+            const response = await fetch('https://api.cloudflare.com/client/v4/graphql', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ query, variables: {
+                accountTag: process.env.CLOUDFLARE_ACCOUNT_ID,
+                datetimeStart: since, datetimeEnd: until, scriptName
+              } })
+            });
+            const body = await response.json();
+            const samples = body?.data?.viewer?.accounts?.[0]?.workersInvocationsAdaptive;
+            if (!response.ok || body.errors?.length || !Array.isArray(samples)) {
+              console.error(JSON.stringify({ worker: scriptName, httpStatus: response.status,
+                apiErrors: body.errors?.map(({ extensions }) => extensions?.code || 'graphql-error') || [] }));
+              failed = true;
+              continue;
+            }
+            const requests = samples.reduce((sum, row) => sum + (row.sum?.requests || 0), 0);
+            const errors = samples.reduce((sum, row) => sum + (row.sum?.errors || 0), 0);
+            console.log(JSON.stringify({ worker: scriptName, from: since, until, requests, errors,
+              statuses: [...new Set(samples.map((row) => row.dimensions?.status))],
+              cpuP99: samples.map((row) => row.quantiles?.cpuTimeP99) }));
+            if (requests === 0) failed = true;
           }
-          const outcomes = {};
-          const cpuMs = [];
-          for (const event of events) {
-            outcomes[event.outcome] = (outcomes[event.outcome] || 0) + 1;
-            if (Number.isFinite(event.cpuTime)) cpuMs.push(event.cpuTime);
-          }
-          console.log(JSON.stringify({
-            worker: process.env.WORKER_NAME,
-            eventCount: events.length,
-            outcomes,
-            cpuMs,
-            // Never print raw logs, requests, signed messages, or secrets.
-            exceptionNames: [...new Set(events.flatMap((event) =>
-              (event.exceptions || []).map((exception) => exception.name || 'unknown')))]
-          }));
-          if (!events.length) process.exitCode = 1;
+          if (failed) process.exitCode = 1;
           NODE
-        env:
-          WORKER_NAME: ${{ matrix.worker }}
