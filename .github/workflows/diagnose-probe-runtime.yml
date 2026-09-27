@@ -1,4 +1,4 @@
-name: Diagnose Probe Runtime
+name: Diagnose Worker CPU Errors
 
 on:
   workflow_dispatch:
@@ -12,8 +12,12 @@ permissions:
 
 jobs:
   tail:
+    strategy:
+      fail-fast: false
+      matrix:
+        worker: [mabolla-close1-agent, mabolla-technocore-probe-listener]
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -24,21 +28,40 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Tail scheduled Worker for five minutes
+      - name: Collect two minutes of Worker outcomes
         shell: bash
         run: |
-          set -o pipefail
           status=0
-          timeout 300s npx wrangler@4.35.0 tail mabolla-technocore-probe-listener --format=json | tee worker-tail.jsonl || status=$?
+          timeout 125s npx wrangler@4.35.0 tail '${{ matrix.worker }}' --format=json > worker-tail.jsonl || status=$?
           if [[ "$status" -ne 0 && "$status" -ne 124 ]]; then
             exit "$status"
           fi
-          if grep -Eq 'workers-ai-(binding-missing|error|invalid-json)' worker-tail.jsonl; then
-            echo "Workers AI runtime failure detected"
-            exit 1
-          fi
-          if grep -q 'workers-ai-decision' worker-tail.jsonl; then
-            echo "Workers AI produced a validated structured decision"
-          else
-            echo "No eligible non-null probe reached Workers AI during this diagnostic window"
-          fi
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const lines = readFileSync('worker-tail.jsonl', 'utf8').split(/\r?\n/).filter(Boolean);
+          const events = [];
+          for (const line of lines) {
+            try {
+              const value = JSON.parse(line);
+              if (typeof value.outcome === 'string') events.push(value);
+            } catch { /* Wrangler may emit status lines before events. */ }
+          }
+          const outcomes = {};
+          const cpuMs = [];
+          for (const event of events) {
+            outcomes[event.outcome] = (outcomes[event.outcome] || 0) + 1;
+            if (Number.isFinite(event.cpuTime)) cpuMs.push(event.cpuTime);
+          }
+          console.log(JSON.stringify({
+            worker: process.env.WORKER_NAME,
+            eventCount: events.length,
+            outcomes,
+            cpuMs,
+            // Never print raw logs, requests, signed messages, or secrets.
+            exceptionNames: [...new Set(events.flatMap((event) =>
+              (event.exceptions || []).map((exception) => exception.name || 'unknown')))]
+          }));
+          if (!events.length) process.exitCode = 1;
+          NODE
+        env:
+          WORKER_NAME: ${{ matrix.worker }}
