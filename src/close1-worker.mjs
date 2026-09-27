@@ -4,6 +4,12 @@ import { advanceClose1Trading } from "./close1-trading.mjs";
 
 export default {
   async scheduled(_controller, env) {
+    // Existing positions are scored by the referee. With trading paused, the
+    // per-minute market/cryptographic scan cannot create a useful order.
+    if (String(env.CLOSE1_TRADING_ENABLED || "").toLowerCase() !== "true") {
+      console.log(JSON.stringify({ service: "mabolla-close1-agent", action: "trading-paused" }));
+      return;
+    }
     let result;
     try {
       result = await observeClose1(env);
