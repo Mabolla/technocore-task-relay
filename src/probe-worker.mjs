@@ -1128,7 +1128,9 @@ export async function listenForProbeWindow(env, options = {}) {
 
 export default {
   async scheduled(_controller, env) {
-    const result = await listenForProbeWindow(env);
+    const result = String(env.PROBE_ENABLED || "").toLowerCase() === "true"
+      ? await listenForProbeWindow(env)
+      : { action: "probe-disabled" };
     let taskRelayKeepalive;
     try {
       taskRelayKeepalive = await publishTaskRelayKeepaliveOnce(env);
