@@ -2,6 +2,16 @@ name: Run Close-1 Agent
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/run-close1.yml
+      - scripts/run-close1-runtime.mjs
+      - scripts/verify-probe-identity.mjs
+      - src/close1-protocol.mjs
+      - src/close1-strategy.mjs
+      - src/close1-trading.mjs
+      - src/close1-worker.mjs
   schedule:
     - cron: "*/5 * * * *"
 
