@@ -1,0 +1,39 @@
+name: Run Close-1 Agent
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: close1-agent-runtime
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TECHNOCORE_AGENT_DID: ${{ secrets.TECHNOCORE_AGENT_DID }}
+      TECHNOCORE_AGENT_PRIVATE_KEY: ${{ secrets.TECHNOCORE_AGENT_PRIVATE_KEY }}
+      TECHNOCORE_URL: https://technocore.chat
+      CLOSE1_ROOM_REGISTRATION_ENABLED: "true"
+      CLOSE1_STRATEGY_ENABLED: "true"
+      CLOSE1_TRADING_ENABLED: "true"
+      CLOSE1_EXIT_ENABLED: "false"
+      CLOSE1_TAKER_ENABLED: "true"
+      CLOSE1_ARCHIVE_OUTCOME_HINTS: mb824l3a1108f4a08e:825:e87eac7433acbd7c125203adb43a1fd6a835e440d86e16389374208c3af93466,mb826l7675b53e8732:827:ff054952ccaf4fed490d623233e7b650472531e64d80372a6f963cee9a97d8ce
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Verify Mabolla signing identity
+        run: node scripts/verify-probe-identity.mjs
+      - name: Run one fail-closed Close-1 cycle
+        run: node scripts/run-close1-runtime.mjs
