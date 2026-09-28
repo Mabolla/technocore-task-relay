@@ -13,6 +13,6 @@
     "CLOSE1_STRATEGY_ENABLED": "true",
     "CLOSE1_TRADING_ENABLED": "true",
     "CLOSE1_EXIT_ENABLED": "false",
-    "CLOSE1_TAKER_ENABLED": "false"
+    "CLOSE1_TAKER_ENABLED": "true"
   }
 }

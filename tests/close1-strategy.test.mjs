@@ -26,6 +26,13 @@ test("deploy watches every Close-1 runtime strategy module", () => {
   }
 });
 
+test("deploy enables both safe execution paths while preserving the final hold", () => {
+  const config = JSON.parse(readFileSync(new URL("../wrangler.close1.jsonc", import.meta.url), "utf8"));
+  assert.equal(config.vars.CLOSE1_TRADING_ENABLED, "true");
+  assert.equal(config.vars.CLOSE1_TAKER_ENABLED, "true");
+  assert.equal(config.vars.CLOSE1_EXIT_ENABLED, "false");
+});
+
 function candlesFrom(closes, market = CLOSE1_MARKET) {
   return closes.map((close, index) => ({
     t: NOW - (closes.length - index) * HOUR_MS,
