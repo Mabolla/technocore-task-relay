@@ -680,12 +680,8 @@ export async function advanceClose1Trading(env, snapshot, strategy, roomRegistra
   if (snapshot?.action !== "healthy" || !Number.isSafeInteger(snapshot?.sweep)) {
     return { action: "blocked", reason: "unhealthy-signed-snapshot" };
   }
-  if (snapshot.tradingEnabled !== true) return { action: "blocked", reason: "snapshot-trading-disabled" };
-  if (roomRegistration?.action !== "ready") return { action: "blocked", reason: "trading-room-not-ready" };
   const now = Number(options.now || Date.now());
-  if (!Number.isFinite(now) || now >= Date.parse(CLOSE1_LOCK_AT) || snapshot.sweep >= CLOSE1_LOCK_SWEEP) {
-    return { action: "blocked", reason: "contest-locked" };
-  }
+  if (!Number.isFinite(now)) return { action: "blocked", reason: "invalid-runtime-time" };
   const fetchImpl = options.fetch || fetch;
   const baseUrl = env.TECHNOCORE_URL || DEFAULT_BASE_URL;
   const journal = await readJournal(baseUrl, fetchImpl, now);
@@ -721,6 +717,15 @@ export async function advanceClose1Trading(env, snapshot, strategy, roomRegistra
   if (ledger.dangerouslyOld) return { action: "blocked", reason: "unresolved-trade-outcome" };
 
   const position = positionFrom(ledger.actions, ledger.outcomes);
+  // Outcome reconciliation remains necessary after the referee freezes new
+  // trading. Only order creation is gated by the live phase and hard lock.
+  if (snapshot.tradingEnabled !== true) {
+    return { action: "position-frozen", reason: "snapshot-trading-disabled", position };
+  }
+  if (roomRegistration?.action !== "ready") return { action: "blocked", reason: "trading-room-not-ready", position };
+  if (now >= Date.parse(CLOSE1_LOCK_AT) || snapshot.sweep >= CLOSE1_LOCK_SWEEP) {
+    return { action: "position-frozen", reason: "contest-locked", position };
+  }
   const visible = visibleOfferIds(journal);
   const activeOffer = ledger.unresolved.find((action) =>
     action.role === "maker" && action.body.terms.until >= snapshot.sweep + 1
