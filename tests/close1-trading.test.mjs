@@ -11,6 +11,7 @@ import {
   close1AutomaticExitGuard,
   close1ProfitLockPlan,
   close1SecondTrancheEntryGuard,
+  preflightClose1ArchiveHints,
   selectClose1Offer,
   verifyArchivedHintOutcomes,
   verifyClose1Offer
@@ -244,6 +245,44 @@ test("binds an omitted trade outcome to the hash-verified official sweep archive
     NOW
   );
   assert.deepEqual(pending, { found: new Map(), pending: [terms.id] });
+});
+
+test("preflights pinned archive outcomes before any expensive signed-room scan", async () => {
+  const first = "a".repeat(64);
+  const second = "b".repeat(64);
+  const hints = `trade-a:825:${first},trade-b:827:${second}`;
+  const pending = await preflightClose1ArchiveHints(
+    { CLOSE1_ARCHIVE_OUTCOME_HINTS: hints },
+    async () => Response.json({ contest: "close-1", sweeps: [{ n: 825, file: first, status: "redacted", path: `redacted/${first}.json` }] }),
+    NOW
+  );
+  assert.deepEqual(pending, {
+    action: "blocked",
+    reason: "archive-outcome-pending",
+    tradeIds: ["trade-b"]
+  });
+
+  const ready = await preflightClose1ArchiveHints(
+    { CLOSE1_ARCHIVE_OUTCOME_HINTS: hints },
+    async () => Response.json({
+      contest: "close-1",
+      sweeps: [
+        { n: 825, file: first, status: "redacted", path: `redacted/${first}.json` },
+        { n: 827, file: second, status: "full", path: `sweeps/${second}.json` }
+      ]
+    }),
+    NOW
+  );
+  assert.deepEqual(ready, { action: "ready", reason: "archive-outcome-files-visible" });
+
+  await assert.rejects(() => preflightClose1ArchiveHints(
+    { CLOSE1_ARCHIVE_OUTCOME_HINTS: hints },
+    async () => Response.json({
+      contest: "close-1",
+      sweeps: [{ n: 825, file: second, status: "redacted", path: `redacted/${second}.json` }]
+    }),
+    NOW
+  ), /does not match/);
 });
 
 test("locks a settled long at a three-percent price gain regardless of leaderboard score", () => {
