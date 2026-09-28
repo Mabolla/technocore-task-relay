@@ -308,7 +308,7 @@ test("trading stays disabled or holds without any write", async () => {
   assert.equal(writes, 0);
 });
 
-test("posts one capped maker offer with two sweeps for counterparties to settle", async () => {
+test("posts one liquid maker slice with two sweeps for counterparties to settle", async () => {
   const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
   const privateKey = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64");
   const posted = [];
@@ -334,7 +334,7 @@ test("posts one capped maker offer with two sweeps for counterparties to settle"
     action: "candidate",
     sweep: 66,
     direction: "long",
-    riskPlan: { quantity: "10.99" }
+    riskPlan: { quantity: "43.90" }
   }, { action: "ready" }, { now: NOW, fetch: fetchMock });
 
   assert.equal(result.action, "offer-posted");
