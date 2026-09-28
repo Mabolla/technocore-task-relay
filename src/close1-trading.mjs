@@ -14,12 +14,15 @@ import {
 } from "./close1-protocol.mjs";
 
 const DEFAULT_BASE_URL = "https://technocore.chat";
+const DEFAULT_ARCHIVE_URL = "https://challenges.technocore.chat/close-1";
 const DID = /^did:key:z6Mk[1-9A-HJ-NP-Za-km-z]{44}$/;
 const TRADE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const AMOUNT = /^[0-9]{1,7}(?:\.[0-9]{1,2})?$/;
 const SIGNATURE = /^[A-Za-z0-9_-]{86}$/;
 const MAX_PUBLIC_MESSAGES = 200;
 const MAX_JOURNAL_BYTES = 256_000;
+const MAX_ARCHIVE_INDEX_BYTES = 1_000_000;
+const MAX_ARCHIVE_SWEEP_BYTES = 20_000_000;
 const OFFER_MAX_AGE_MS = 12 * 60 * 1000;
 const MAX_PRICE_SLIPPAGE = 0.0025;
 const MAX_INITIAL_NOTIONAL = 10_000;
@@ -59,6 +62,38 @@ async function readJson(url, fetchImpl) {
   const response = await fetchImpl(url, { headers: { accept: "application/json" } });
   if (!response.ok) throw new Error(`Close-1 read failed: ${response.status}`);
   return response.json();
+}
+
+async function readBoundedText(url, fetchImpl, maximumBytes) {
+  const response = await fetchImpl(url, { headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error(`Close-1 archive read failed: ${response.status}`);
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maximumBytes) throw new Error("Close-1 archive response exceeds safe size");
+  const text = await response.text();
+  if (text.length > maximumBytes) throw new Error("Close-1 archive response exceeds safe size");
+  return text;
+}
+
+function parseArchiveOutcomeHints(value) {
+  if (!value) return new Map();
+  const entries = String(value).split(",").filter(Boolean);
+  if (entries.length > 4) throw new Error("Too many Close-1 archive outcome hints");
+  const hints = new Map();
+  for (const entry of entries) {
+    const [id, sweepText, file, ...extra] = entry.split(":");
+    const sweep = Number(sweepText);
+    if (extra.length || !TRADE_ID.test(id || "") || !Number.isSafeInteger(sweep) || sweep < 1 || sweep > CLOSE1_LOCK_SWEEP) {
+      throw new Error("Invalid Close-1 archive outcome hint");
+    }
+    if (!/^[a-f0-9]{64}$/.test(file || "")) throw new Error("Invalid Close-1 archive outcome hint");
+    hints.set(id, { sweep, file });
+  }
+  return hints;
+}
+
+async function sha256Hex(text) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function readJournal(baseUrl, fetchImpl, now) {
@@ -268,6 +303,98 @@ function outcomeText(action, outcome) {
     sweep: outcome.sweep,
     flow_file: outcome.flow_file
   });
+}
+
+function archivedTradeMatches(action, trade) {
+  if (!trade || typeof trade !== "object" || trade.id !== action.body.terms.id) return false;
+  let termsText;
+  try {
+    termsText = canonicalClose1Terms({
+      id: trade.id,
+      maker: trade.maker,
+      px: trade.px,
+      qty: trade.qty,
+      side: trade.side,
+      taker: trade.taker,
+      until: trade.until
+    });
+  } catch {
+    return false;
+  }
+  if (termsText !== action.termsText || !DID.test(trade.countersigner || "")) return false;
+  return action.role === "maker"
+    ? trade.maker === CLOSE1_AGENT_DID
+    : trade.countersigner === CLOSE1_AGENT_DID;
+}
+
+export async function verifyArchivedHintOutcomes(actions, outcomes, flows, env, fetchImpl, now) {
+  const hints = parseArchiveOutcomeHints(env?.CLOSE1_ARCHIVE_OUTCOME_HINTS);
+  const pending = actions.filter((action) => hints.has(action.body.terms.id) && !outcomes.has(action.body.terms.id));
+  if (!pending.length) return { found: new Map(), pending: [] };
+
+  const archiveBase = String(env?.CLOSE1_ARCHIVE_URL || DEFAULT_ARCHIVE_URL).replace(/\/$/, "");
+  const indexText = await readBoundedText(
+    `${archiveBase}/index.json?n=${Math.trunc(now)}`,
+    fetchImpl,
+    MAX_ARCHIVE_INDEX_BYTES
+  );
+  let index;
+  try { index = JSON.parse(indexText); } catch { throw new Error("Close-1 archive index contains invalid JSON"); }
+  if (index?.contest !== CLOSE1_SEASON || !Array.isArray(index?.sweeps)) {
+    throw new Error("Close-1 archive index is invalid");
+  }
+  const entries = new Map(index.sweeps.map((entry) => [entry?.n, entry]));
+  const flowBySweep = new Map(flows.map((flow) => [flow.n, flow]));
+  const found = new Map();
+  const waiting = [];
+  const records = new Map();
+
+  for (const action of pending) {
+    const id = action.body.terms.id;
+    const hint = hints.get(id);
+    const { sweep } = hint;
+    const entry = entries.get(sweep);
+    const flow = flowBySweep.get(sweep);
+    if (!entry) {
+      waiting.push(id);
+      continue;
+    }
+    if (entry.file !== hint.file || (flow && flow.file !== hint.file) || !/^[a-f0-9]{64}$/.test(entry.file || "")
+      || !new Set(["full", "redacted"]).has(entry.status) || typeof entry.path !== "string") {
+      throw new Error("Close-1 archive entry does not match the signed flow");
+    }
+    let record = records.get(entry.path);
+    if (!record) {
+      const text = await readBoundedText(`${archiveBase}/${entry.path}`, fetchImpl, MAX_ARCHIVE_SWEEP_BYTES);
+      const expectedHash = entry.status === "full" ? entry.file : entry.sha256;
+      if (!/^[a-f0-9]{64}$/.test(expectedHash || "") || await sha256Hex(text) !== expectedHash) {
+        throw new Error("Close-1 archive sweep hash mismatch");
+      }
+      try { record = JSON.parse(text); } catch { throw new Error("Close-1 archive sweep contains invalid JSON"); }
+      if (record?.input?.t !== "sweep" || record.input.n !== sweep || record?.output?.sweep !== sweep
+        || !Array.isArray(record.input.trades) || !Array.isArray(record.output.trades)
+        || record.input.trades.length !== record.output.trades.length) {
+        throw new Error("Close-1 archive sweep shape is invalid");
+      }
+      records.set(entry.path, record);
+    }
+    const indexInSweep = record.input.trades.findIndex((trade) => archivedTradeMatches(action, trade));
+    if (indexInSweep < 0) {
+      waiting.push(id);
+      continue;
+    }
+    const result = record.output.trades[indexInSweep];
+    if (result?.id !== id || !new Set(["settled", "void"]).has(result?.outcome)) {
+      throw new Error("Close-1 archive outcome is invalid");
+    }
+    found.set(id, {
+      outcome: result.outcome,
+      ...(result.outcome === "void" ? { reason: String(result.reason || "unknown") } : {}),
+      sweep,
+      flow_file: hint.file
+    });
+  }
+  return { found, pending: waiting };
 }
 
 function visibleOfferIds(journal) {
@@ -530,6 +657,33 @@ export async function advanceClose1Trading(env, snapshot, strategy, roomRegistra
   const journal = await readJournal(baseUrl, fetchImpl, now);
   const flows = await verifiedFlows(baseUrl, fetchImpl, now);
   const ledger = await reconcileOutcomes(journal, flows, snapshot, env, fetchImpl, now);
+  let archived;
+  try {
+    archived = await verifyArchivedHintOutcomes(ledger.actions, ledger.outcomes, flows, env, fetchImpl, now);
+  } catch (error) {
+    return { action: "blocked", reason: "archive-outcome-read-failed", detail: String(error?.message || error) };
+  }
+  if (archived.pending.length) {
+    return { action: "blocked", reason: "archive-outcome-pending", tradeIds: archived.pending };
+  }
+  if (archived.found.size) {
+    let nonce = Math.trunc(now);
+    const recorded = [];
+    for (const action of ledger.actions) {
+      const outcome = archived.found.get(action.body.terms.id);
+      if (!outcome) continue;
+      const note = await publishSignedRecord(
+        CLOSE1_CONTROL_ROOM,
+        outcomeText(action, outcome),
+        env,
+        fetchImpl,
+        nonce
+      );
+      nonce = Math.max(nonce + 1, Number(note.nonce) + 1);
+      recorded.push(action.body.terms.id);
+    }
+    return { action: "archive-outcomes-recorded", tradeIds: recorded };
+  }
   if (ledger.dangerouslyOld) return { action: "blocked", reason: "unresolved-trade-outcome" };
 
   const position = positionFrom(ledger.actions, ledger.outcomes);
