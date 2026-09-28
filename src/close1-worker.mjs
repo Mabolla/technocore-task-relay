@@ -1,6 +1,6 @@
 import { CLOSE1_AGENT_DID, advanceClose1RoomRegistration, observeClose1 } from "./close1-protocol.mjs";
 import { analyzeClose1Market, fetchBenchmarkCandles, fetchNvdaCandles } from "./close1-strategy.mjs";
-import { advanceClose1Trading } from "./close1-trading.mjs";
+import { advanceClose1Trading, preflightClose1ArchiveHints } from "./close1-trading.mjs";
 
 export default {
   async scheduled(_controller, env) {
@@ -8,6 +8,23 @@ export default {
     // per-minute market/cryptographic scan cannot create a useful order.
     if (String(env.CLOSE1_TRADING_ENABLED || "").toLowerCase() !== "true") {
       console.log(JSON.stringify({ service: "mabolla-close1-agent", action: "trading-paused" }));
+      return;
+    }
+    let archiveGate;
+    try {
+      archiveGate = await preflightClose1ArchiveHints(env);
+    } catch (error) {
+      console.error(JSON.stringify({
+        service: "mabolla-close1-agent",
+        phase: "archive-preflight",
+        action: "blocked",
+        reason: "archive-outcome-read-failed",
+        error: String(error?.message || error)
+      }));
+      return;
+    }
+    if (archiveGate.action !== "ready") {
+      console.log(JSON.stringify({ service: "mabolla-close1-agent", phase: "archive-preflight", ...archiveGate }));
       return;
     }
     let result;

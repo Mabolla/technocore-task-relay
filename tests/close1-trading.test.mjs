@@ -11,6 +11,7 @@ import {
   close1AutomaticExitGuard,
   close1ProfitLockPlan,
   close1SecondTrancheEntryGuard,
+  preflightClose1ArchiveHints,
   selectClose1Offer,
   verifyArchivedHintOutcomes,
   verifyClose1Offer
@@ -246,6 +247,44 @@ test("binds an omitted trade outcome to the hash-verified official sweep archive
   assert.deepEqual(pending, { found: new Map(), pending: [terms.id] });
 });
 
+test("preflights pinned archive outcomes before any expensive signed-room scan", async () => {
+  const first = "a".repeat(64);
+  const second = "b".repeat(64);
+  const hints = `trade-a:825:${first},trade-b:827:${second}`;
+  const pending = await preflightClose1ArchiveHints(
+    { CLOSE1_ARCHIVE_OUTCOME_HINTS: hints },
+    async () => Response.json({ contest: "close-1", sweeps: [{ n: 825, file: first, status: "redacted", path: `redacted/${first}.json` }] }),
+    NOW
+  );
+  assert.deepEqual(pending, {
+    action: "blocked",
+    reason: "archive-outcome-pending",
+    tradeIds: ["trade-b"]
+  });
+
+  const ready = await preflightClose1ArchiveHints(
+    { CLOSE1_ARCHIVE_OUTCOME_HINTS: hints },
+    async () => Response.json({
+      contest: "close-1",
+      sweeps: [
+        { n: 825, file: first, status: "redacted", path: `redacted/${first}.json` },
+        { n: 827, file: second, status: "full", path: `sweeps/${second}.json` }
+      ]
+    }),
+    NOW
+  );
+  assert.deepEqual(ready, { action: "ready", reason: "archive-outcome-files-visible" });
+
+  await assert.rejects(() => preflightClose1ArchiveHints(
+    { CLOSE1_ARCHIVE_OUTCOME_HINTS: hints },
+    async () => Response.json({
+      contest: "close-1",
+      sweeps: [{ n: 825, file: second, status: "redacted", path: `redacted/${second}.json` }]
+    }),
+    NOW
+  ), /does not match/);
+});
+
 test("locks a settled long at a three-percent price gain regardless of leaderboard score", () => {
   const long = {
     direction: "long",
@@ -375,6 +414,31 @@ test("trading stays disabled or holds without any write", async () => {
   }, snapshot(), { action: "hold", reason: "mixed-trend" }, { action: "ready" }, { now: NOW, fetch: fetchMock });
   assert.deepEqual(result, { action: "hold", reason: "mixed-trend", position: 0 });
   assert.equal(writes, 0);
+});
+
+test("continues position reconciliation after the referee freezes new trading", async () => {
+  const reads = [];
+  const fetchMock = async (url) => {
+    const target = String(url);
+    reads.push(target);
+    if (target.includes("/mabolla-task-relay/export")) return new Response("");
+    if (target.includes("/d-close1-flow?")) return Response.json({ messages: [FLOW] });
+    return Response.json({ messages: [] });
+  };
+  const result = await advanceClose1Trading({
+    TECHNOCORE_AGENT_DID: CLOSE1_AGENT_DID,
+    CLOSE1_TRADING_ENABLED: "true"
+  }, { ...snapshot(), tradingEnabled: false }, { action: "hold" }, { action: "blocked" }, {
+    now: NOW,
+    fetch: fetchMock
+  });
+  assert.deepEqual(result, {
+    action: "position-frozen",
+    reason: "snapshot-trading-disabled",
+    position: 0
+  });
+  assert.ok(reads.some((url) => url.includes("/mabolla-task-relay/export")));
+  assert.ok(reads.some((url) => url.includes("/d-close1-flow?")));
 });
 
 test("posts one liquid maker slice with two sweeps for counterparties to settle", async () => {

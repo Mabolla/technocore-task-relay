@@ -91,6 +91,44 @@ function parseArchiveOutcomeHints(value) {
   return hints;
 }
 
+function parseArchiveIndex(text) {
+  let index;
+  try { index = JSON.parse(text); } catch { throw new Error("Close-1 archive index contains invalid JSON"); }
+  if (index?.contest !== CLOSE1_SEASON || !Array.isArray(index?.sweeps)) {
+    throw new Error("Close-1 archive index is invalid");
+  }
+  return index;
+}
+
+export async function preflightClose1ArchiveHints(env, fetchImpl = fetch, now = Date.now()) {
+  const hints = parseArchiveOutcomeHints(env?.CLOSE1_ARCHIVE_OUTCOME_HINTS);
+  if (!hints.size) return { action: "ready", reason: "no-archive-outcome-hints" };
+
+  const archiveBase = String(env?.CLOSE1_ARCHIVE_URL || DEFAULT_ARCHIVE_URL).replace(/\/$/, "");
+  const indexText = await readBoundedText(
+    `${archiveBase}/index.json?n=${Math.trunc(now)}`,
+    fetchImpl,
+    MAX_ARCHIVE_INDEX_BYTES
+  );
+  const index = parseArchiveIndex(indexText);
+  const entries = new Map(index.sweeps.map((entry) => [entry?.n, entry]));
+  const pending = [];
+  for (const [tradeId, hint] of hints) {
+    const entry = entries.get(hint.sweep);
+    if (!entry) {
+      pending.push(tradeId);
+      continue;
+    }
+    if (entry.file !== hint.file || !/^[a-f0-9]{64}$/.test(entry.file || "")
+      || !new Set(["full", "redacted"]).has(entry.status) || typeof entry.path !== "string") {
+      throw new Error("Close-1 archive entry does not match the pinned signed flow");
+    }
+  }
+  return pending.length
+    ? { action: "blocked", reason: "archive-outcome-pending", tradeIds: pending }
+    : { action: "ready", reason: "archive-outcome-files-visible" };
+}
+
 async function sha256Hex(text) {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -338,11 +376,7 @@ export async function verifyArchivedHintOutcomes(actions, outcomes, flows, env, 
     fetchImpl,
     MAX_ARCHIVE_INDEX_BYTES
   );
-  let index;
-  try { index = JSON.parse(indexText); } catch { throw new Error("Close-1 archive index contains invalid JSON"); }
-  if (index?.contest !== CLOSE1_SEASON || !Array.isArray(index?.sweeps)) {
-    throw new Error("Close-1 archive index is invalid");
-  }
+  const index = parseArchiveIndex(indexText);
   const entries = new Map(index.sweeps.map((entry) => [entry?.n, entry]));
   const flowBySweep = new Map(flows.map((flow) => [flow.n, flow]));
   const found = new Map();
@@ -646,12 +680,8 @@ export async function advanceClose1Trading(env, snapshot, strategy, roomRegistra
   if (snapshot?.action !== "healthy" || !Number.isSafeInteger(snapshot?.sweep)) {
     return { action: "blocked", reason: "unhealthy-signed-snapshot" };
   }
-  if (snapshot.tradingEnabled !== true) return { action: "blocked", reason: "snapshot-trading-disabled" };
-  if (roomRegistration?.action !== "ready") return { action: "blocked", reason: "trading-room-not-ready" };
   const now = Number(options.now || Date.now());
-  if (!Number.isFinite(now) || now >= Date.parse(CLOSE1_LOCK_AT) || snapshot.sweep >= CLOSE1_LOCK_SWEEP) {
-    return { action: "blocked", reason: "contest-locked" };
-  }
+  if (!Number.isFinite(now)) return { action: "blocked", reason: "invalid-runtime-time" };
   const fetchImpl = options.fetch || fetch;
   const baseUrl = env.TECHNOCORE_URL || DEFAULT_BASE_URL;
   const journal = await readJournal(baseUrl, fetchImpl, now);
@@ -687,6 +717,15 @@ export async function advanceClose1Trading(env, snapshot, strategy, roomRegistra
   if (ledger.dangerouslyOld) return { action: "blocked", reason: "unresolved-trade-outcome" };
 
   const position = positionFrom(ledger.actions, ledger.outcomes);
+  // Outcome reconciliation remains necessary after the referee freezes new
+  // trading. Only order creation is gated by the live phase and hard lock.
+  if (snapshot.tradingEnabled !== true) {
+    return { action: "position-frozen", reason: "snapshot-trading-disabled", position };
+  }
+  if (roomRegistration?.action !== "ready") return { action: "blocked", reason: "trading-room-not-ready", position };
+  if (now >= Date.parse(CLOSE1_LOCK_AT) || snapshot.sweep >= CLOSE1_LOCK_SWEEP) {
+    return { action: "position-frozen", reason: "contest-locked", position };
+  }
   const visible = visibleOfferIds(journal);
   const activeOffer = ledger.unresolved.find((action) =>
     action.role === "maker" && action.body.terms.until >= snapshot.sweep + 1
