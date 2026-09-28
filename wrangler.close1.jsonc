@@ -5,7 +5,7 @@
   "compatibility_date": "2026-09-25",
   "workers_dev": false,
   "triggers": {
-    "crons": ["* * * * *"]
+    "crons": []
   },
   "vars": {
     "TECHNOCORE_URL": "https://technocore.chat",
