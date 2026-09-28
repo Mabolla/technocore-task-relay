@@ -23,6 +23,7 @@ const MAX_JOURNAL_BYTES = 256_000;
 const OFFER_MAX_AGE_MS = 12 * 60 * 1000;
 const MAX_PRICE_SLIPPAGE = 0.0025;
 const MAX_INITIAL_NOTIONAL = 10_000;
+const MAX_MAKER_OFFER_NOTIONAL = 2_500;
 const OUTCOME_LOOKBACK = 200;
 const MAKER_OFFER_LIFETIME_SWEEPS = 2;
 export const CLOSE1_PROFIT_LOCK_PCT = 3;
@@ -661,7 +662,11 @@ export async function advanceClose1Trading(env, snapshot, strategy, roomRegistra
     };
   }
 
-  const offerQty = Math.floor(Math.min(remainingQty, remainingNotional / (reference * 1.01)) * 100) / 100;
+  const offerQty = Math.floor(Math.min(
+    remainingQty,
+    remainingNotional / (reference * 1.01),
+    MAX_MAKER_OFFER_NOTIONAL / (reference * 1.01)
+  ) * 100) / 100;
   if (offerQty < 0.1) return { action: "position-ready", direction, position, targetQty: requestedTarget };
   const terms = makeOfferTerms(snapshot, direction, offerQty);
   const termsText = canonicalClose1Terms(terms);
