@@ -8,6 +8,7 @@ import {
 import {
   advanceClose1Trading,
   canonicalClose1Terms,
+  close1AutomaticExitGuard,
   close1ProfitLockPlan,
   close1SecondTrancheEntryGuard,
   selectClose1Offer,
@@ -257,6 +258,24 @@ test("closes the second tranche at 230 and preserves the first tranche target", 
     averageEntry: "224.71",
     triggerPrice: "231.46"
   });
+});
+
+test("keeps automatic exits disabled while the final all-in entry is active", () => {
+  const close = {
+    action: "close",
+    reason: "second-tranche-fixed-profit-lock",
+    quantity: "10.97",
+    averageEntry: "225.19",
+    triggerPrice: "230.00"
+  };
+  assert.deepEqual(close1AutomaticExitGuard({ CLOSE1_EXIT_ENABLED: "false" }, close), {
+    action: "hold",
+    reason: "automatic-exit-disabled",
+    quantity: "10.97",
+    averageEntry: "225.19",
+    triggerPrice: "230.00"
+  });
+  assert.deepEqual(close1AutomaticExitGuard({ CLOSE1_EXIT_ENABLED: "true" }, close), close);
 });
 
 test("does not chase the second tranche above its profitable 230 exit cap", () => {

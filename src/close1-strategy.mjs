@@ -6,8 +6,8 @@ export const HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info";
 export const CLOSE1_FINAL_AT = "2026-10-04T10:00:00.000Z";
 export const CLOSE1_STARTING_BALANCE = 10_000;
 export const CLOSE1_FEE_RATE = 0.01;
-export const CLOSE1_MAX_ALLOCATION = 0.5;
-export const CLOSE1_CONFIRMED_TARGET_ALLOCATION = 0.5;
+export const CLOSE1_MAX_ALLOCATION = 1;
+export const CLOSE1_CONFIRMED_TARGET_ALLOCATION = 1;
 export const CLOSE1_STAGE_ONE_ENTRY_HOURS = 207;
 export const CLOSE1_TIME_BOXED_ENTRY_HOURS = 192;
 

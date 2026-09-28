@@ -107,7 +107,7 @@ test("holds until NVDA underperforms the benchmark by five points", () => {
   assert.equal(result.metrics.currentTop3Score, "89.32");
 });
 
-test("creates a half-balance long plan only for validated relative-value reversion", () => {
+test("creates a full-balance long plan for the confirmed final directional allocation", () => {
   const { nvda, benchmark } = candidateSeries();
   const result = analyzeClose1Market(
     candlesFrom(nvda),
@@ -120,8 +120,8 @@ test("creates a half-balance long plan only for validated relative-value reversi
   assert.equal(result.direction, "long");
   assert.ok(result.metrics.relativeGap168hPct <= -5);
   assert.ok(result.metrics.nvdaReturn672hPct > 0);
-  assert.equal(result.riskPlan.allocation, 0.5);
-  assert.ok(Number(result.riskPlan.notional) <= 5_000);
+  assert.equal(result.riskPlan.allocation, 1);
+  assert.ok(Number(result.riskPlan.notional) <= 10_000);
   assert.ok(Number(result.riskPlan.beatCurrentTop3Final) > nvda.at(-1));
 });
 
@@ -150,7 +150,7 @@ test("targets the confirmed two-tranche allocation before the hard fallback", ()
   assert.equal(result.metrics.remainingHours, CLOSE1_STAGE_ONE_ENTRY_HOURS);
   assert.ok(result.metrics.relativeGap168hPct > -5);
   assert.equal(result.riskPlan.allocation, CLOSE1_CONFIRMED_TARGET_ALLOCATION);
-  assert.ok(Number(result.riskPlan.notional) <= 5_000);
+  assert.ok(Number(result.riskPlan.notional) <= 10_000);
 });
 
 test("guarantees a time-boxed long candidate if the rare primary signal never arrives", () => {
@@ -178,7 +178,7 @@ test("guarantees a time-boxed long candidate if the rare primary signal never ar
   assert.equal(result.metrics.remainingHours, CLOSE1_TIME_BOXED_ENTRY_HOURS);
   assert.ok(result.metrics.relativeGap168hPct > -5);
   assert.ok(result.metrics.nvdaReturn672hPct < 0);
-  assert.equal(result.riskPlan.allocation, 0.5);
+  assert.equal(result.riskPlan.allocation, 1);
 });
 
 test("holds if the long regime is not positive or the validated horizon has passed", () => {
@@ -233,6 +233,6 @@ test("blocks divergent prices, insufficient alignment, and allocations over the 
     side: "long",
     entryPrice: "225",
     targetScore: "89.32",
-    allocation: 0.51
+    allocation: 1.01
   }), /risk cap/);
 });
