@@ -416,6 +416,31 @@ test("trading stays disabled or holds without any write", async () => {
   assert.equal(writes, 0);
 });
 
+test("continues position reconciliation after the referee freezes new trading", async () => {
+  const reads = [];
+  const fetchMock = async (url) => {
+    const target = String(url);
+    reads.push(target);
+    if (target.includes("/mabolla-task-relay/export")) return new Response("");
+    if (target.includes("/d-close1-flow?")) return Response.json({ messages: [FLOW] });
+    return Response.json({ messages: [] });
+  };
+  const result = await advanceClose1Trading({
+    TECHNOCORE_AGENT_DID: CLOSE1_AGENT_DID,
+    CLOSE1_TRADING_ENABLED: "true"
+  }, { ...snapshot(), tradingEnabled: false }, { action: "hold" }, { action: "blocked" }, {
+    now: NOW,
+    fetch: fetchMock
+  });
+  assert.deepEqual(result, {
+    action: "position-frozen",
+    reason: "snapshot-trading-disabled",
+    position: 0
+  });
+  assert.ok(reads.some((url) => url.includes("/mabolla-task-relay/export")));
+  assert.ok(reads.some((url) => url.includes("/d-close1-flow?")));
+});
+
 test("posts one liquid maker slice with two sweeps for counterparties to settle", async () => {
   const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
   const privateKey = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64");
