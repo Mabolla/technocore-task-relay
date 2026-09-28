@@ -22,7 +22,7 @@ const MAX_PUBLIC_MESSAGES = 200;
 const MAX_JOURNAL_BYTES = 256_000;
 const OFFER_MAX_AGE_MS = 12 * 60 * 1000;
 const MAX_PRICE_SLIPPAGE = 0.0025;
-const MAX_INITIAL_NOTIONAL = 5_000;
+const MAX_INITIAL_NOTIONAL = 10_000;
 const OUTCOME_LOOKBACK = 200;
 const MAKER_OFFER_LIFETIME_SWEEPS = 2;
 export const CLOSE1_PROFIT_LOCK_PCT = 3;
@@ -466,6 +466,18 @@ export function close1ProfitLockPlan(actions, outcomes, position, reference) {
   };
 }
 
+export function close1AutomaticExitGuard(env, profitLock) {
+  if (profitLock?.action !== "close") return profitLock;
+  if (String(env?.CLOSE1_EXIT_ENABLED || "").toLowerCase() === "true") return profitLock;
+  return {
+    action: "hold",
+    reason: "automatic-exit-disabled",
+    quantity: profitLock.quantity,
+    averageEntry: profitLock.averageEntry,
+    triggerPrice: profitLock.triggerPrice
+  };
+}
+
 export function close1SecondTrancheEntryGuard(position, remainingQty, reference) {
   const currentPosition = Number(position);
   const remaining = Number(remainingQty);
@@ -535,12 +547,12 @@ export async function advanceClose1Trading(env, snapshot, strategy, roomRegistra
   const pendingTrade = ledger.unresolved.find((action) => action.role === "taker");
   if (pendingTrade) return { action: "waiting-trade", tradeId: pendingTrade.body.terms.id, position };
 
-  const profitLock = close1ProfitLockPlan(
+  const profitLock = close1AutomaticExitGuard(env, close1ProfitLockPlan(
     ledger.actions,
     ledger.outcomes,
     position,
     snapshot.reference
-  );
+  ));
   if (profitLock.action === "blocked") {
     return { action: "blocked", reason: profitLock.reason, position };
   }
