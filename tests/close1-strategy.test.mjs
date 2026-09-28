@@ -40,6 +40,7 @@ test("deploy enables both safe execution paths while preserving the final hold",
 
 test("runs the fail-closed Close-1 cycle on GitHub without the Cloudflare CPU limit", () => {
   const workflow = readFileSync(new URL("../.github/workflows/run-close1.yml", import.meta.url), "utf8");
+  assert.match(workflow, /push:\n\s+branches: \[main\]/);
   assert.match(workflow, /cron: "\*\/5 \* \* \* \*"/);
   assert.match(workflow, /node scripts\/verify-probe-identity\.mjs/);
   assert.match(workflow, /node scripts\/run-close1-runtime\.mjs/);
