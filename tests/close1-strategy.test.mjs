@@ -35,6 +35,17 @@ test("deploy enables both safe execution paths while preserving the final hold",
     config.vars.CLOSE1_ARCHIVE_OUTCOME_HINTS,
     "mb824l3a1108f4a08e:825:e87eac7433acbd7c125203adb43a1fd6a835e440d86e16389374208c3af93466,mb826l7675b53e8732:827:ff054952ccaf4fed490d623233e7b650472531e64d80372a6f963cee9a97d8ce"
   );
+  assert.deepEqual(config.triggers.crons, []);
+});
+
+test("runs the fail-closed Close-1 cycle on GitHub without the Cloudflare CPU limit", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/run-close1.yml", import.meta.url), "utf8");
+  assert.match(workflow, /cron: "\*\/5 \* \* \* \*"/);
+  assert.match(workflow, /node scripts\/verify-probe-identity\.mjs/);
+  assert.match(workflow, /node scripts\/run-close1-runtime\.mjs/);
+  assert.match(workflow, /CLOSE1_EXIT_ENABLED: "false"/);
+  assert.match(workflow, /mb824l3a1108f4a08e:825:e87eac7433acbd7c125203adb43a1fd6a835e440d86e16389374208c3af93466/);
+  assert.match(workflow, /mb826l7675b53e8732:827:ff054952ccaf4fed490d623233e7b650472531e64d80372a6f963cee9a97d8ce/);
 });
 
 function candlesFrom(closes, market = CLOSE1_MARKET) {
