@@ -12,6 +12,7 @@ import {
   close1ProfitLockPlan,
   close1SecondTrancheEntryGuard,
   selectClose1Offer,
+  verifyArchivedHintOutcomes,
   verifyClose1Offer
 } from "../src/close1-trading.mjs";
 
@@ -175,6 +176,74 @@ test("selects price-compatible offers without exceeding the remaining cap", asyn
     remainingNotional: 100,
     knownIds: new Set()
   }), null);
+});
+
+test("binds an omitted trade outcome to the hash-verified official sweep archive", async () => {
+  const terms = {
+    id: "mb824l3a1108f4a08e",
+    maker: CLOSE1_AGENT_DID,
+    px: "223.01",
+    qty: "11.09",
+    side: "buy",
+    taker: "any",
+    until: 826
+  };
+  const action = {
+    role: "maker",
+    direction: "long",
+    termsText: canonicalClose1Terms(terms),
+    body: { t: "offer", season: "close-1", terms }
+  };
+  const sweep = JSON.stringify({
+    input: {
+      t: "sweep",
+      n: 825,
+      ref: "223.23",
+      close: "223.01",
+      owners: [],
+      trades: [{ ...terms, countersigner: "did:key:z6MknqaR6BcqZX1W7S8Au71V1bL55QqACzUEG3LTKcrEW4Rw" }]
+    },
+    output: {
+      sweep: 825,
+      reference: "223.23",
+      close: "223.01",
+      minted: [],
+      trades: [{ id: terms.id, outcome: "settled", maker_fee: "24.731809", taker_fee: "24.731809" }],
+      global_price: "223.01"
+    }
+  });
+  const hash = Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(sweep))).toString("hex");
+  const index = {
+    contest: "close-1",
+    sweeps: [{ n: 825, file: hash, status: "full", path: `sweeps/${hash}.json`, bytes: sweep.length }]
+  };
+  const fetchMock = async (url) => String(url).includes("index.json")
+    ? Response.json(index)
+    : new Response(sweep, { headers: { "content-length": String(sweep.length) } });
+  const result = await verifyArchivedHintOutcomes(
+    [action],
+    new Map(),
+    [{ n: 825, file: hash }],
+    { CLOSE1_ARCHIVE_OUTCOME_HINTS: `${terms.id}:825:${hash}` },
+    fetchMock,
+    NOW
+  );
+  assert.deepEqual(result.pending, []);
+  assert.deepEqual(result.found.get(terms.id), {
+    outcome: "settled",
+    sweep: 825,
+    flow_file: hash
+  });
+
+  const pending = await verifyArchivedHintOutcomes(
+    [action],
+    new Map(),
+    [{ n: 825, file: hash }],
+    { CLOSE1_ARCHIVE_OUTCOME_HINTS: `${terms.id}:825:${hash}` },
+    async () => Response.json({ contest: "close-1", sweeps: [] }),
+    NOW
+  );
+  assert.deepEqual(pending, { found: new Map(), pending: [terms.id] });
 });
 
 test("locks a settled long at a three-percent price gain regardless of leaderboard score", () => {
