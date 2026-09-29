@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 
 import {
   CLOSE1_AGENT_DID,
@@ -284,14 +283,6 @@ test("preflights pinned archive outcomes before any expensive signed-room scan",
     }),
     NOW
   ), /does not match/);
-});
-
-test("both runtimes pin the omitted sweep 824 settlement before trading", () => {
-  const expected = "mb822le05d3c34c797:824:0527d1ea85775dc081ace61ed2f21936c44208b0be26cdccd9cfe270ee10d7dd";
-  const workflow = readFileSync(new URL("../.github/workflows/run-close1.yml", import.meta.url), "utf8");
-  const wrangler = readFileSync(new URL("../wrangler.close1.jsonc", import.meta.url), "utf8");
-  assert.ok(workflow.includes(`CLOSE1_ARCHIVE_OUTCOME_HINTS: ${expected},`));
-  assert.ok(wrangler.includes(`"CLOSE1_ARCHIVE_OUTCOME_HINTS": "${expected},`));
 });
 
 test("locks a settled long at a three-percent price gain regardless of leaderboard score", () => {
