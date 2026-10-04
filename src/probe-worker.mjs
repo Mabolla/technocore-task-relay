@@ -537,9 +537,10 @@ export async function publishTaskRelayKeepaliveOnce(env, now = Date.now(), optio
   const latest = writes[0];
   const friday = options.friday === true;
   if (friday) {
-    const formatDay = (timestamp) => new Intl.DateTimeFormat("en-CA", {
+    const dayFormatter = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit"
-    }).format(new Date(timestamp));
+    });
+    const formatDay = (timestamp) => dayFormatter.format(new Date(timestamp));
     const today = formatDay(now);
     for (const { record, timestamp } of writes) {
       if (record.from !== EXPECTED_AGENT_DID || formatDay(timestamp) !== today) continue;
