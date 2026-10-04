@@ -147,6 +147,44 @@ test("Task Relay keepalive publishes once at the threshold and verifies the exac
   }
 });
 
+test("Friday cron sends one signed keepalive even when the room is fresh", async () => {
+  const originalFetch = globalThis.fetch;
+  const keyPair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+  const privateKey = Buffer.from(await crypto.subtle.exportKey("pkcs8", keyPair.privateKey)).toString("base64");
+  const did = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
+  const lastWrite = { seq: 82, ts: "2026-10-04T17:37:54.548858Z", from: did, text: "previous activity" };
+  const now = Date.parse("2026-10-09T10:00:00Z");
+  let posted = null;
+  let posts = 0;
+  globalThis.fetch = async (_url, options = {}) => {
+    if (options.method === "POST") {
+      posted = JSON.parse(options.body);
+      posts += 1;
+      return new Response("accepted", { status: 200 });
+    }
+    return Response.json({ messages: posted
+      ? [lastWrite, { seq: 83, ts: "2026-10-09T10:00:01Z", from: did, nonce: posted.nonce, text: posted.text, sig: posted.sig }]
+      : [lastWrite] });
+  };
+  const env = {
+    TASK_RELAY_KEEPALIVE_ENABLED: "true",
+    TECHNOCORE_AGENT_DID: did,
+    TECHNOCORE_AGENT_PRIVATE_KEY: privateKey
+  };
+  try {
+    assert.equal((await publishTaskRelayKeepaliveOnce(env, now)).action, "fresh");
+    assert.equal(posts, 0);
+    assert.deepEqual(await publishTaskRelayKeepaliveOnce(env, now, { friday: true }),
+      { action: "published", seq: 83, previousLastSeq: 82 });
+    assert.equal(posts, 1);
+    assert.deepEqual(await publishTaskRelayKeepaliveOnce(env, now + 60_000, { friday: true }),
+      { action: "already-published-friday", seq: 83 });
+    assert.equal(posts, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Task Relay keepalive fails closed on non-empty history without a valid timestamp", async () => {
   const originalFetch = globalThis.fetch;
   let posts = 0;

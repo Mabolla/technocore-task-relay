@@ -521,7 +521,7 @@ export function hasTaskRelayKeepalive(messages, expectedText) {
   );
 }
 
-export async function publishTaskRelayKeepaliveOnce(env, now = Date.now()) {
+export async function publishTaskRelayKeepaliveOnce(env, now = Date.now(), options = {}) {
   if (String(env.TASK_RELAY_KEEPALIVE_CLOSED || "").toLowerCase() === "true") return { action: "closed" };
   if (String(env.TASK_RELAY_KEEPALIVE_ENABLED || "").toLowerCase() !== "true") return { action: "disabled" };
   if (env.TECHNOCORE_AGENT_DID !== EXPECTED_AGENT_DID) return { action: "silence", reason: "agent-did-mismatch" };
@@ -535,9 +535,25 @@ export async function publishTaskRelayKeepaliveOnce(env, now = Date.now()) {
   if (messages.length && !writes.length) return { action: "silence", reason: "invalid-room-history" };
 
   const latest = writes[0];
+  const friday = options.friday === true;
+  if (friday) {
+    const dayFormatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit"
+    });
+    const formatDay = (timestamp) => dayFormatter.format(new Date(timestamp));
+    const today = formatDay(now);
+    for (const { record, timestamp } of writes) {
+      if (record.from !== EXPECTED_AGENT_DID || formatDay(timestamp) !== today) continue;
+      let body;
+      try { body = JSON.parse(record.text); } catch { continue; }
+      if (body?.type === "task-relay.keepalive.v1") {
+        return { action: "already-published-friday", seq: Number(record.seq) };
+      }
+    }
+  }
   if (latest) {
     const age = Math.max(0, now - latest.timestamp);
-    if (age < TASK_RELAY_KEEPALIVE_AFTER_MS) {
+    if (age < TASK_RELAY_KEEPALIVE_AFTER_MS && !friday) {
       return {
         action: "fresh",
         lastWriteAt: new Date(latest.timestamp).toISOString(),
@@ -1127,7 +1143,12 @@ export async function listenForProbeWindow(env, options = {}) {
 }
 
 export default {
-  async scheduled(_controller, env) {
+  async scheduled(controller, env) {
+    if (controller?.cron === "0 10 * * 5") {
+      const taskRelayKeepalive = await publishTaskRelayKeepaliveOnce(env, Date.now(), { friday: true });
+      console.log(JSON.stringify({ action: "friday-task-relay-keepalive", taskRelayKeepalive }));
+      return;
+    }
     const result = String(env.PROBE_ENABLED || "").toLowerCase() === "true"
       ? await listenForProbeWindow(env)
       : { action: "probe-disabled" };
