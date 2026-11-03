@@ -1,0 +1,24 @@
+name: FLOP Devnet Enroll
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  enroll-and-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TECHNOCORE_AGENT_DID: ${{ secrets.TECHNOCORE_AGENT_DID }}
+      TECHNOCORE_AGENT_PRIVATE_KEY: ${{ secrets.TECHNOCORE_AGENT_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run deterministic tests
+        run: node --test tests/flop-devnet-enroll.test.mjs
+      - name: Enroll same Mabolla identity and run one probe
+        run: node scripts/flop-devnet-enroll.mjs
