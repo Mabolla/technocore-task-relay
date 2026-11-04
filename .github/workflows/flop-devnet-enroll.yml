@@ -2,6 +2,9 @@ name: FLOP Devnet Enroll
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/flop-devnet-enroll.yml]
 
 permissions:
   contents: read
