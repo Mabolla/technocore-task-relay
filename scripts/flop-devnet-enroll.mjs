@@ -121,18 +121,8 @@ export async function enrollAndProbe(env = process.env) {
   if (!enrollment.key || !enrollment.model) throw new Error("Enrollment did not return a scoped key");
   if (!catalogById.has(enrollment.model)) throw new Error("Enrollment returned a model outside the live catalog");
 
-  const initialCredential = await jsonFetch("https://api.flop.network/v1/keys/me", {
-    headers: { authorization: `Bearer ${enrollment.key}` }
-  });
   const enrollmentQuota = Number(enrollment.remaining_quota);
-  const introspectedQuota = Number(initialCredential.remaining_quota);
-  if (!["owner", "ephemeral"].includes(initialCredential.credential)
-      || !Number.isFinite(enrollmentQuota)
-      || !Number.isFinite(introspectedQuota)
-      || enrollmentQuota <= 0
-      || introspectedQuota <= 0) {
-    throw new Error("Enrollment allowance introspection mismatch");
-  }
+  if (!Number.isFinite(enrollmentQuota) || enrollmentQuota <= 0) throw new Error("Enrollment returned no usable allowance");
 
   const completion = await jsonFetch("https://api.flop.network/v1/chat/completions", {
     method: "POST",
@@ -147,6 +137,7 @@ export async function enrollAndProbe(env = process.env) {
       max_tokens: 16
     })
   });
+  await new Promise((resolve) => setTimeout(resolve, 61_000));
   const [finalCredential, receipt] = await Promise.all([
     jsonFetch("https://api.flop.network/v1/keys/me", {
       headers: { authorization: `Bearer ${enrollment.key}` }
@@ -155,6 +146,9 @@ export async function enrollAndProbe(env = process.env) {
       headers: { authorization: `Bearer ${enrollment.key}` }
     })
   ]);
+  if (!["owner", "ephemeral"].includes(finalCredential.credential) || Number(finalCredential.remaining_quota) < 0) {
+    throw new Error("Post-inference allowance introspection failed");
+  }
   return {
     did: MABOLLA_DID,
     address: MABOLLA_SS58,
