@@ -2,6 +2,12 @@ name: FLOP Devnet Enroll
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/flop-devnet-enroll.yml
+      - scripts/flop-devnet-enroll.mjs
+      - tests/flop-devnet-enroll.test.mjs
 
 permissions:
   contents: read
@@ -9,7 +15,7 @@ permissions:
 jobs:
   enroll-and-probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
       TECHNOCORE_AGENT_DID: ${{ secrets.TECHNOCORE_AGENT_DID }}
       TECHNOCORE_AGENT_PRIVATE_KEY: ${{ secrets.TECHNOCORE_AGENT_PRIVATE_KEY }}
