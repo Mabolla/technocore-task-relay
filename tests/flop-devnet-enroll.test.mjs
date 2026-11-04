@@ -44,7 +44,7 @@ test("preflight pins the live Devnet, Mabolla balance, and catalog scope", () =>
       network: { network: "devnet", status: "live", expected_genesis_hash: DEVNET_GENESIS, observed_genesis_hash: DEVNET_GENESIS }
     },
     account: { address: MABOLLA_SS58, balance: "25000000000000000000", liveBalance: true },
-    catalog: { data: [{ id: "qwen/test", canonical_slug: "qwen/test", supported_parameters: ["max_tokens"], x_flop: { registry_model: "Qwen/Test" } }] }
+    catalog: { data: [{ id: "qwen/test", canonical_slug: "qwen/test", supported_parameters: ["max_tokens"], "x-flop": { registry_model: "Qwen/Test" } }] }
   };
   assert.ok(validatePreflight(input).has("qwen/test"));
   assert.throws(() => validatePreflight({ ...input, account: { ...input.account, balance: "0" } }));
