@@ -124,6 +124,7 @@ export async function enrollAndProbe(env = process.env) {
   const enrollmentQuota = Number(enrollment.remaining_quota);
   if (!Number.isFinite(enrollmentQuota) || enrollmentQuota <= 0) throw new Error("Enrollment returned no usable allowance");
 
+  await new Promise((resolve) => setTimeout(resolve, 61_000));
   const completion = await jsonFetch("https://api.flop.network/v1/chat/completions", {
     method: "POST",
     headers: {
