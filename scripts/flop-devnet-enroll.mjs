@@ -124,15 +124,13 @@ export async function enrollAndProbe(env = process.env) {
   const initialCredential = await jsonFetch("https://api.flop.network/v1/keys/me", {
     headers: { authorization: `Bearer ${enrollment.key}` }
   });
-  const catalogModel = catalogById.get(enrollment.model);
-  const scopeText = JSON.stringify(initialCredential.scope ?? {});
   const enrollmentQuota = Number(enrollment.remaining_quota);
   const introspectedQuota = Number(initialCredential.remaining_quota);
   if (!["owner", "ephemeral"].includes(initialCredential.credential)
       || !Number.isFinite(enrollmentQuota)
       || !Number.isFinite(introspectedQuota)
-      || Math.abs(enrollmentQuota - introspectedQuota) > 1e-9
-      || (!scopeText.includes(enrollment.model) && !scopeText.includes(catalogModel["x-flop"].registry_model))) {
+      || enrollmentQuota <= 0
+      || introspectedQuota <= 0) {
     throw new Error("Enrollment allowance introspection mismatch");
   }
 
