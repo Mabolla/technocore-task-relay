@@ -85,7 +85,7 @@ export function validatePreflight({ health, catalog, account }) {
   const models = catalog?.data;
   if (!Array.isArray(models) || models.length < 1) throw new Error("No live catalog model");
   for (const model of models) {
-    if (model.id !== model.canonical_slug || !model?.x_flop?.registry_model) throw new Error("Catalog model identity is incomplete");
+    if (model.id !== model.canonical_slug || !model?.["x-flop"]?.registry_model) throw new Error("Catalog model identity is incomplete");
     if (!model.supported_parameters?.includes("max_tokens")) throw new Error("Catalog model does not support max_tokens");
   }
   return new Map(models.map((model) => [model.id, model]));
