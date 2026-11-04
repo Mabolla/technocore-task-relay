@@ -3,6 +3,7 @@ import { createHash, createPrivateKey, createPublicKey, sign } from "node:crypto
 export const MABOLLA_DID = "did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG";
 export const MABOLLA_SS58 = "5CPgb5pfqurJbZZT6ts99wCc3Npdjtfxs4VMxNnstLap1omn";
 export const DEVNET_GENESIS = "0x99c172c095340ace980631f9123544c6bebd4839f3437e463533422d8be2d631";
+export const INFERENCE_REQUEST_ID = "mabolla-devnet-identity-proof-v1";
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 function base58(bytes) {
@@ -59,10 +60,35 @@ export function validateChallenge(payload, now = Date.now()) {
     `Nonce: ${payload.nonce}`
   ];
   if (lines.length !== 8 || expected.some((line, i) => lines[i] !== line)) throw new Error("Unexpected enrollment statement");
-  if (!/^Issued At: \d{4}-\d{2}-\d{2}T/.test(lines[6]) || !/^Expiration Time: \d{4}-\d{2}-\d{2}T/.test(lines[7])) {
-    throw new Error("Invalid enrollment timestamps");
+  const issuedAt = Date.parse(lines[6].replace("Issued At: ", ""));
+  const expiresAt = Date.parse(lines[7].replace("Expiration Time: ", ""));
+  if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)) throw new Error("Invalid enrollment timestamps");
+  if (Math.abs(issuedAt - now) > 60_000 || expiresAt !== payload.expires_at || expiresAt - issuedAt !== 300_000) {
+    throw new Error("Enrollment statement timestamp mismatch");
   }
   return payload.message;
+}
+
+export function validatePreflight({ health, catalog, account }) {
+  if (health?.status !== "ok" || health?.connected !== true || health?.syncing !== false) {
+    throw new Error("Gateway is not healthy and synchronized");
+  }
+  if (health?.network?.network !== "devnet" || health?.network?.status !== "live") {
+    throw new Error("Gateway is not serving the live Devnet");
+  }
+  if (health?.network?.observed_genesis_hash !== DEVNET_GENESIS || health?.network?.expected_genesis_hash !== DEVNET_GENESIS) {
+    throw new Error("Gateway genesis mismatch");
+  }
+  if (account?.address !== MABOLLA_SS58 || account?.liveBalance !== true || BigInt(account?.balance ?? "0") < 1_000_000_000_000_000_000n) {
+    throw new Error("Mabolla account does not have a verified live minimum balance");
+  }
+  const models = catalog?.data;
+  if (!Array.isArray(models) || models.length < 1) throw new Error("No live catalog model");
+  for (const model of models) {
+    if (model.id !== model.canonical_slug || !model?.x_flop?.registry_model) throw new Error("Catalog model identity is incomplete");
+    if (!model.supported_parameters?.includes("max_tokens")) throw new Error("Catalog model does not support max_tokens");
+  }
+  return new Map(models.map((model) => [model.id, model]));
 }
 
 async function jsonFetch(url, options = {}) {
@@ -77,6 +103,13 @@ export async function enrollAndProbe(env = process.env) {
   const identity = identitiesFor(env.TECHNOCORE_AGENT_PRIVATE_KEY ?? "");
   if (identity.did !== MABOLLA_DID || identity.address !== MABOLLA_SS58) throw new Error("Private key does not match Mabolla DID/account");
 
+  const [health, catalog, account] = await Promise.all([
+    jsonFetch("https://api.flop.network/health"),
+    jsonFetch("https://api.flop.network/v1/models"),
+    jsonFetch(`https://explorer.devnet.flop.network/api/accounts/${MABOLLA_SS58}`)
+  ]);
+  const catalogById = validatePreflight({ health, catalog, account });
+
   const challenge = await jsonFetch(`https://api.flop.network/v1/enroll/wallet/challenge?address=${MABOLLA_SS58}`);
   const message = validateChallenge(challenge);
   const signature = `0x${sign(null, Buffer.from(message), identity.privateKey).toString("hex")}`;
@@ -86,24 +119,48 @@ export async function enrollAndProbe(env = process.env) {
     body: JSON.stringify({ address: MABOLLA_SS58, message, signature })
   });
   if (!enrollment.key || !enrollment.model) throw new Error("Enrollment did not return a scoped key");
+  if (!catalogById.has(enrollment.model)) throw new Error("Enrollment returned a model outside the live catalog");
+
+  const initialCredential = await jsonFetch("https://api.flop.network/v1/keys/me", {
+    headers: { authorization: `Bearer ${enrollment.key}` }
+  });
+  if (initialCredential.credential !== "ephemeral" || initialCredential.remaining_quota !== enrollment.remaining_quota) {
+    throw new Error("Enrollment allowance introspection mismatch");
+  }
 
   const completion = await jsonFetch("https://api.flop.network/v1/chat/completions", {
     method: "POST",
-    headers: { authorization: `Bearer ${enrollment.key}`, "content-type": "application/json" },
+    headers: {
+      authorization: `Bearer ${enrollment.key}`,
+      "content-type": "application/json",
+      "x-request-id": INFERENCE_REQUEST_ID
+    },
     body: JSON.stringify({
       model: enrollment.model,
       messages: [{ role: "user", content: "Reply with exactly: Mabolla devnet identity verified" }],
-      max_tokens: 16,
-      temperature: 0
+      max_tokens: 16
     })
   });
+  const [finalCredential, receipt] = await Promise.all([
+    jsonFetch("https://api.flop.network/v1/keys/me", {
+      headers: { authorization: `Bearer ${enrollment.key}` }
+    }),
+    jsonFetch(`https://api.flop.network/v1/keys/me/receipts/${encodeURIComponent(INFERENCE_REQUEST_ID)}`, {
+      headers: { authorization: `Bearer ${enrollment.key}` }
+    })
+  ]);
   return {
     did: MABOLLA_DID,
     address: MABOLLA_SS58,
     model: enrollment.model,
-    remaining_quota: enrollment.remaining_quota,
+    initial_quota: enrollment.remaining_quota,
+    remaining_quota: finalCredential.remaining_quota,
+    uses_remaining: finalCredential.uses_remaining,
     expires_at: enrollment.expires_at,
-    inference: completion.choices?.[0]?.message?.content ?? null
+    inference: completion.choices?.[0]?.message?.content ?? null,
+    usage: completion.usage ?? null,
+    gateway_receipt: completion.x_flop_receipt ?? null,
+    ledger_receipt: receipt
   };
 }
 
