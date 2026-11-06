@@ -1,0 +1,40 @@
+name: FLOP miner package stage
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: flop-miner-vast-59441078
+  cancel-in-progress: false
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Verify package and runtime
+        env:
+          SSH_KEY: ${{ secrets.VAST_FLOP_SSH_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          keyfile="$(mktemp)"
+          trap 'rm -f "$keyfile"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$keyfile"
+          unset SSH_KEY
+          ssh -i "$keyfile" -p 40369 -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new root@79.152.74.8 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          test ! -e /opt/flop-miner/signer
+          install -d -m 700 /opt/flop-miner-staging
+          cd /opt/flop-miner-staging
+          curl -fsSL https://flop.network/releases/cli/miner-pack-devnet-ts-20261106/flop-miner-pack-devnet-ts-20261106.tar.gz -o pack.tar.gz
+          echo "35f222f748447a8aabdd015d94260d8facfd29305691c3cf7ed033cbb2b514b1  pack.tar.gz" | sha256sum -c -
+          tar xzf pack.tar.gz --no-same-owner
+          docker compose version
+          docker info --format '{{json .Runtimes}}'
+          CLI=ghcr.io/flop-labs/flop-core/cli:v0.1.220@sha256:c8f3456c48d41cec9d0229d1e1dd9eb8d6247a22f350c51078d85f129601bbbd
+          docker pull "$CLI"
+          docker run --rm --network host "$CLI" --network devnet --rpc wss://rpc.devnet.flop.network network status --json
+          echo STAGING_VERIFIED_NO_IDENTITY_OR_REGISTRATION
+          REMOTE
