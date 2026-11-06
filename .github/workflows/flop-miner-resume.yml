@@ -4,7 +4,7 @@ on:
     inputs:
       mode:
         type: choice
-        options: [test-only, prepare-host, activate-registered]
+        options: [test-only, prepare-host, sponsor-existing, activate-registered]
         default: test-only
         required: true
       paid_host_authorized:
@@ -26,6 +26,7 @@ jobs:
       - name: Syntax and pure policy tests
         run: |
           set -euo pipefail
+          bash -n scripts/flop-miner-sponsor-existing.sh
           bash -n scripts/flop-miner-prepare-host.sh
           bash -n scripts/flop-miner-activate-host.sh
           node --test tests/flop-miner-retry-policy.test.mjs
@@ -50,6 +51,7 @@ jobs:
           unset SSH_KEY
           case "$MODE" in
             prepare-host) script=scripts/flop-miner-prepare-host.sh; flag=--prepare-existing-host;;
+            sponsor-existing) script=scripts/flop-miner-sponsor-existing.sh; flag=--one-approved-retry;;
             activate-registered) script=scripts/flop-miner-activate-host.sh; flag=--activate-registered-miner;;
             *) exit 2;;
           esac
