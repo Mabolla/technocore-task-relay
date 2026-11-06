@@ -1,0 +1,31 @@
+name: FLOP miner sponsorship diagnosis
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: flop-miner-vast-59441078
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - env:
+          SSH_KEY: ${{ secrets.VAST_FLOP_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          k="$(mktemp)"
+          trap 'rm -f "$k"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$k"
+          unset SSH_KEY
+          ssh -i "$k" -p 40369 -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new root@79.152.74.8 'bash -s' <<'REMOTE'
+          set -eu
+          cd /opt/flop-miner
+          for f in signer sponsorship-attempted sponsorship-result.json network.json; do
+            if test -e "$f"; then stat -c '%n mode=%a bytes=%s' "$f"; else echo "$f absent"; fi
+          done
+          if test -e sponsorship-result.json; then head -c 12000 sponsorship-result.json; fi
+          curl -fsSL --max-time 20 https://faucet.flop.network/limits
+          REMOTE
