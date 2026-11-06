@@ -1,0 +1,28 @@
+name: FLOP miner read-only preflight
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: flop-miner-vast-59441078
+  cancel-in-progress: false
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check existing Vast instance without installing software
+        env:
+          SSH_KEY: ${{ secrets.VAST_FLOP_SSH_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          keyfile="$(mktemp)"
+          trap 'rm -f "$keyfile"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$keyfile"
+          unset SSH_KEY
+          ssh -i "$keyfile" -p 40369 -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new root@79.152.74.8 'set -eu; echo PREFLIGHT_BEGIN; uname -m; nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv; command -v docker || true; docker info --format "{{.ServerVersion}}" 2>/dev/null || true; df -h /; echo PREFLIGHT_END' | tee preflight.txt
+          printf '## Vast 59441078 read-only preflight\n\n```text\n' >> "$GITHUB_STEP_SUMMARY"
+          cat preflight.txt >> "$GITHUB_STEP_SUMMARY"
+          printf '\n```\nNo installation, identity creation, or enrollment performed.\n' >> "$GITHUB_STEP_SUMMARY"
