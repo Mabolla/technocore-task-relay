@@ -1,0 +1,57 @@
+name: FLOP miner controlled resume
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [test-only, prepare-host, activate-registered]
+        default: test-only
+        required: true
+      paid_host_authorized:
+        description: Existing Vast host is running with explicit user approval
+        type: boolean
+        default: false
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: flop-miner-vast-59441078
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Syntax and pure policy tests
+        run: |
+          set -euo pipefail
+          bash -n scripts/flop-miner-prepare-host.sh
+          bash -n scripts/flop-miner-activate-host.sh
+          node --test tests/flop-miner-retry-policy.test.mjs
+  host:
+    needs: validate
+    if: inputs.mode != 'test-only' && inputs.paid_host_authorized == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Run selected reviewed phase on existing host only
+        env:
+          SSH_KEY: ${{ secrets.VAST_FLOP_SSH_PRIVATE_KEY }}
+          MODE: ${{ inputs.mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          keyfile="$(mktemp)"
+          trap 'rm -f "$keyfile"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$keyfile"
+          unset SSH_KEY
+          case "$MODE" in
+            prepare-host) script=scripts/flop-miner-prepare-host.sh; flag=--prepare-existing-host;;
+            activate-registered) script=scripts/flop-miner-activate-host.sh; flag=--activate-registered-miner;;
+            *) exit 2;;
+          esac
+          ssh -i "$keyfile" -p 40369 -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new root@79.152.74.8 bash -s -- "$flag" < "$script"
+          printf '## Miner phase completed\nPhase: %s\nInstance: 59441078\nThis does not establish accepted calibration or successful paid inference.\n' "$MODE" >> "$GITHUB_STEP_SUMMARY"
