@@ -1,0 +1,46 @@
+name: FLOP miner guarded sponsorship
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: flop-miner-vast-59441078
+  cancel-in-progress: false
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Single dedicated miner account and sponsor
+        env:
+          SSH_KEY: ${{ secrets.VAST_FLOP_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          k="$(mktemp)"
+          trap 'rm -f "$k"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$k"
+          unset SSH_KEY
+          ssh -i "$k" -p 40369 -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new root@79.152.74.8 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          umask 077
+          CLI=ghcr.io/flop-labs/flop-core/cli:v0.1.220@sha256:c8f3456c48d41cec9d0229d1e1dd9eb8d6247a22f350c51078d85f129601bbbd
+          cd /opt/flop-miner-staging
+          echo "35f222f748447a8aabdd015d94260d8facfd29305691c3cf7ed033cbb2b514b1  pack.tar.gz" | sha256sum -c -
+          install -d -m 700 /opt/flop-miner
+          cp -n flop-miner-pack-devnet-ts-20261106/* /opt/flop-miner/
+          cd /opt/flop-miner
+          curl -fsSL https://faucet.flop.network/limits -o limits.json
+          python3 -c 'import json; assert json.load(open("limits.json"))["sponsor"]["miner"]["status"]=="open", "Sponsor closed: no identity created"'
+          test ! -e sponsorship-attempted
+          docker run --rm --network host "$CLI" --network devnet --rpc wss://rpc.devnet.flop.network network status --json > network.json
+          python3 -c 'import json; d=json.load(open("network.json")); assert d["rpc"]["genesis_hash"]=="0x99c172c095340ace980631f9123544c6bebd4839f3437e463533422d8be2d631" and d["faucet"]["matches_rpc"] is True'
+          if [ ! -e signer ]; then
+            docker run --rm --network none -v /opt/flop-miner:/work --entrypoint node "$CLI" --input-type=module -e 'import {randomBytes} from "node:crypto"; import {writeFileSync} from "node:fs"; writeFileSync("/work/signer","0x"+randomBytes(32).toString("hex")+"\n",{mode:0o600,flag:"wx"});'
+          fi
+          test "$(stat -c %a signer)" = 600
+          touch sponsorship-attempted
+          FLOP_CLI="$CLI" timeout 120 bash ./sponsor.sh > sponsorship-result.json 2>&1
+          cat sponsorship-result.json
+          echo SINGLE_SPONSORSHIP_COMPLETE
+          REMOTE
