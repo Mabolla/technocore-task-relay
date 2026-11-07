@@ -14,6 +14,48 @@ WORKER=ghcr.io/flop-labs/flop-core/miner-worker:v0.1.286@sha256:78211fe5f63820ee
 BACKEND=ghcr.io/flop-labs/flop-core/miner-vllm-toploc:v0.1.239@sha256:9b6c6dfc4d77ac37583d28dbfdcb4fa96207ae95956c1e859b7d5e9eef6f7b9e
 MODEL=0x1a52c1abe781db051e70ae357f72bb70161ca0c092df0b618f22a9292ba63306
 RPC=wss://rpc.devnet.flop.network
+# Dedicated existing Vast VM only. Do not repair a missing host driver.
+command -v nvidia-smi >/dev/null
+nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
+nvidia-smi --query-gpu=name --format=csv,noheader | grep -Fx 'NVIDIA GeForce RTX 5090'
+gpu_probe() {
+  timeout 35 docker run --rm --pull never --network none --gpus all --entrypoint nvidia-smi "$BACKEND" --query-gpu=name,driver_version,memory.total --format=csv
+}
+if ! gpu_probe; then
+  . /etc/os-release
+  case "$ID" in ubuntu|debian) ;; *) echo 'Unsupported OS for this repair'; exit 1;; esac
+  test -d /run/systemd/system
+  test -z "$(docker ps -q)" || { echo 'Running containers; no daemon restart'; exit 1; }
+  if ! command -v nvidia-ctk >/dev/null; then
+    nvidia_tmp=$(mktemp -d)
+    trap 'rm -f -- "$nvidia_tmp/key" "$nvidia_tmp/keyring.gpg"; rmdir -- "$nvidia_tmp"' EXIT
+    curl -fsS --max-time 20 https://nvidia.github.io/libnvidia-container/gpgkey -o "$nvidia_tmp/key"
+    key_fpr=$(gpg --batch --show-keys --with-colons "$nvidia_tmp/key" | awk -F: '$1=="fpr"{print $10;exit}')
+    test "$key_fpr" = C95B321B61E88C1809C4F759DDCAE044F796ECB0
+    gpg --batch --dearmor -o "$nvidia_tmp/keyring.gpg" "$nvidia_tmp/key"
+    install -m 0644 "$nvidia_tmp/keyring.gpg" /usr/share/keyrings/mabolla-nvidia-container-toolkit.gpg
+    if ! grep -qs 'nvidia.github.io/libnvidia-container/stable/deb' /etc/apt/sources.list /etc/apt/sources.list.d/*; then
+      printf '%s\n' 'deb [signed-by=/usr/share/keyrings/mabolla-nvidia-container-toolkit.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/$(ARCH) /' > /etc/apt/sources.list.d/mabolla-nvidia-container-toolkit.list
+    fi
+    timeout 120 apt-get -o Acquire::Retries=0 -o Acquire::https::Timeout=20 update
+    export DEBIAN_FRONTEND=noninteractive
+    timeout 180 apt-get install -y --no-remove --no-install-recommends nvidia-container-toolkit=1.20.1-1 nvidia-container-toolkit-base=1.20.1-1 libnvidia-container-tools=1.20.1-1 libnvidia-container1=1.20.1-1
+  fi
+  test -z "$(docker ps -q)" || { echo 'Running containers; no daemon restart'; exit 1; }
+  test ! -L /etc/docker/daemon.json
+  repair_backup=$(mktemp -d /opt/flop-miner/docker-runtime-repair.XXXXXXXX)
+  if test -f /etc/docker/daemon.json; then cp -p -- /etc/docker/daemon.json "$repair_backup/daemon.json"; fi
+  rollback_runtime() {
+    if test -f "$repair_backup/daemon.json"; then cp -p -- "$repair_backup/daemon.json" /etc/docker/daemon.json; else rm -f -- /etc/docker/daemon.json; fi
+    timeout 45 systemctl restart docker
+  }
+  if ! nvidia-ctk runtime configure --runtime=docker || ! timeout 45 systemctl restart docker || ! gpu_probe; then
+    rollback_runtime
+    echo 'GPU probe failed; Docker configuration rolled back'
+    exit 1
+  fi
+fi
+echo 'NVIDIA_DOCKER_GPU_VERIFIED'
 docker compose version
 docker pull "$CLI"
 # Derive ONLY the public address. Secret stays in its read-only container mount.
