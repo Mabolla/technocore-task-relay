@@ -76,13 +76,16 @@ p=pathlib.Path('prepare-model.json')
 assert p.is_file() and not p.is_symlink() and p.stat().st_size < 1048576
 d=json.loads(p.read_text())
 assert isinstance(d,dict)
-root=d.get('verified_root')
+def canon(value):
+    if not isinstance(value,str) or not re.fullmatch(r'(?:0x)?[a-fA-F0-9]{64}',value): return None
+    return '0x'+value.removeprefix('0x').lower()
+root=canon(d.get('verified_root'))
 err=d.get('error') or d.get('code')
 if isinstance(err,dict): err=err.get('code')
 if not isinstance(err,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,100}',err): err=None
 print(json.dumps({'fields':[k for k in d if re.fullmatch(r'[a-zA-Z0-9_-]{1,50}',k)][:40], 'ok': d.get('ok') if isinstance(d.get('ok'),bool) else None, 'verified_root':root if isinstance(root,str) and re.fullmatch(r'0x[a-f0-9]{64}',root) else None,'error_code':err}),flush=True)
 assert d.get('ok') is not False and d.get('success') is not False and not d.get('error'), 'CLI returned an explicit model refusal'
-assert root==sys.argv[1], 'Measured model root missing or mismatched'
+assert root==sys.argv[1] and canon(d.get('model_hash'))==sys.argv[1] and str(d.get('precision')).upper()=='BF16', 'Measured model root, model identity or BF16 precision missing or mismatched'
 checkpoint=pathlib.Path('models/qwen2.5-0.5b-instruct')
 assert (checkpoint/'config.json').is_file() and any(p.is_file() for p in checkpoint.glob('*.safetensors')), 'Verified checkpoint files not present'
 PY
