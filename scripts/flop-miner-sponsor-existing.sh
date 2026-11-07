@@ -8,7 +8,7 @@ flock -n 9 || { echo 'Another miner operation active'; exit 1; }
 cd /opt/flop-miner
 test -f signer && test ! -L signer
 [ "$(stat -c %u signer)" = 0 ] && [ "$(stat -c %a signer)" = 600 ]
-CLI=ghcr.io/flop-labs/flop-core/cli:v0.1.220@sha256:c8f3456c48d41cec9d0229d1e1dd9eb8d6247a22f350c51078d85f129601bbbd
+CLI=ghcr.io/flop-labs/flop-core/cli:v0.1.290@sha256:24e32b034b0d3600ee28127dad30d4228e623235f2dc62da34c2c85ba5e21a88
 ADDRESS=5Ek2J6WSgcunfe8hLRpZRGnCa3aUmvZAMGM5ugfyJ2VhtrWw
 address="$(docker run --rm --network none -v /opt/flop-miner/signer:/work/signer:ro --entrypoint node "$CLI" --input-type=module -e 'import {readFileSync} from "node:fs";import {Keyring} from "@polkadot/api";import {cryptoWaitReady} from "@polkadot/util-crypto";await cryptoWaitReady();console.log(new Keyring({type:"sr25519",ss58Format:42}).addFromUri(readFileSync("/work/signer","utf8").trim()).address);')"
 [ "$address" = "$ADDRESS" ] || { echo 'Identity mismatch'; exit 1; }

@@ -9,7 +9,7 @@ flock -n 9 || { echo 'Another miner operation is active'; exit 1; }
 cd /opt/flop-miner
 [ -f signer ] && [ ! -L signer ]
 [ "$(stat -c %u signer)" = 0 ] && [ "$(stat -c %a signer)" = 600 ]
-CLI=ghcr.io/flop-labs/flop-core/cli:v0.1.220@sha256:c8f3456c48d41cec9d0229d1e1dd9eb8d6247a22f350c51078d85f129601bbbd
+CLI=ghcr.io/flop-labs/flop-core/cli:v0.1.290@sha256:24e32b034b0d3600ee28127dad30d4228e623235f2dc62da34c2c85ba5e21a88
 WORKER=ghcr.io/flop-labs/flop-core/miner-worker:v0.1.286@sha256:78211fe5f63820eeb1191e834f3a1eb7f573bc34348bdd4c0b0f07c7824fe7b5
 BACKEND=ghcr.io/flop-labs/flop-core/miner-vllm-toploc:v0.1.239@sha256:9b6c6dfc4d77ac37583d28dbfdcb4fa96207ae95956c1e859b7d5e9eef6f7b9e
 MODEL=0x1a52c1abe781db051e70ae357f72bb70161ca0c092df0b618f22a9292ba63306
