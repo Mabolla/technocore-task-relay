@@ -30,7 +30,21 @@ for attempt in $(seq 1 36); do
   if "${C[@]}" exec -T backend python3 -c 'import os,json,urllib.request as u;r=json.load(u.urlopen(u.Request("http://127.0.0.1:8000/health",headers={"Authorization":"Bearer "+os.environ["INFERENCE_API_KEY"]}),timeout=5));assert r.get("model_identity")=="measured";assert r.get("model_hash")=="0x1a52c1abe781db051e70ae357f72bb70161ca0c092df0b618f22a9292ba63306";assert r.get("decode_policy_hash")==os.environ["DECODE_POLICY_HASH"];print(json.dumps({k:r.get(k) for k in ("model_identity","model_hash","decode_policy_hash")}))' > activation-backend-health.json 2>/dev/null; then healthy=1; break; fi
   sleep 10
 done
-[ "$healthy" = 1 ] || { echo 'Backend health/model gate failed; worker not started'; exit 1; }
+if [ "$healthy" != 1 ]; then
+  "${C[@]}" ps --all backend
+  cid=$("${C[@]}" ps --all -q backend)
+  if [ -n "$cid" ]; then
+    docker inspect --format='Backend state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restart_count={{.RestartCount}}' "$cid"
+    docker logs --tail 150 "$cid" 2>&1 | python3 -c 'import re,sys;s=sys.stdin.read(); patterns={"model-root":r"(?i)model.{0,25}(?:root|hash).{0,60}(?:mismatch|expected|failed)","checkpoint-missing":r"(?i)(?:no such file|not a directory|filenotfounderror)","gpu-or-cuda":r"(?i)(?:cuda error|no kernel image|no cuda gpus|cuda out of memory|compute capability)","decode-policy":r"(?i)decode.policy.{0,60}(?:mismatch|failed|invalid)","backend-started":r"(?i)(?:application startup complete|uvicorn running)","model-load":r"(?i)(?:loading model|loading safetensors)"};print("Backend diagnostic categories:",",".join(k for k,v in patterns.items() if re.search(v,s)) or "none")'
+  fi
+  "${C[@]}" exec -T backend python3 -c 'import json,os,urllib.request as u,urllib.error as e; req=u.Request("http://127.0.0.1:8000/health",headers={"Authorization":"Bearer "+os.environ["INFERENCE_API_KEY"]});
+try:
+ r=json.load(u.urlopen(req,timeout=5)); print(json.dumps({k:r.get(k) for k in ("model_identity","model_hash","decode_policy_hash","precision")}))
+except e.HTTPError as x: print("Backend health HTTP",x.code)
+except Exception as x: print("Backend health error type",type(x).__name__)' || true
+  echo 'Backend health/model gate failed; worker not started'
+  exit 1
+fi
 install -d -m 755 /usr/local/lib/mabolla-flop
 BIN=/usr/local/lib/mabolla-flop/cloudflared-2026.10.7
 if [ ! -e "$BIN" ]; then
