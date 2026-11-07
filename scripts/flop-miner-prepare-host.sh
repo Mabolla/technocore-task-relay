@@ -39,3 +39,11 @@ for raw in sys.stdin:
   if w in v or (w in {"400","401","403","404","409","429","500","502","503","504"}): safe.append(w)
   elif not safe or safe[-1]!="…": safe.append("…")
  print(json.dumps({"redacted_log_signature":" ".join(safe[:55])}))'
+# Read current worker settings without printing any credential or URL.
+cid=$("${C[@]}" ps -q worker </dev/null)
+test -n "$cid"
+docker inspect --format '{{json .Config.Env}}' "$cid" </dev/null | python3 -c 'import json,sys,re; e=dict(s.split("=",1) for s in json.load(sys.stdin) if "=" in s); keys=[k for k in e if k=="SESSION_CHAIN" or re.search(r"OFFER|TOPLOC|CAPTURE|DRAIN",k)]; out={};
+for k in keys:
+ v=e[k].lower(); out[k]=v if v in {"1","0","true","false","on","off","enabled","disabled"} else ("configured" if v else "empty")
+print(json.dumps(out,sort_keys=True))'
+"${C[@]}" config --format json </dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); w=d.get("services",{}).get("worker",{}); e=w.get("environment",{}); print(json.dumps({"compose_forwards_offer_indexer":"SESSION_OFFER_INDEXER_URL" in e,"compose_forwards_offer_interval":"SESSION_OFFER_INTERVAL_MINUTES" in e,"compose_forwards_chain":"SESSION_CHAIN" in e}))'
