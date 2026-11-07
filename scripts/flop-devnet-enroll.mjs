@@ -91,22 +91,13 @@ export function validatePreflight({ health, catalog, account }) {
   return new Map(models.map((model) => [model.id, model]));
 }
 
-async function jsonFetch(url, options = {}) {
-  const { retry429Once = false, ...fetchOptions } = options;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const response = await fetch(url, { ...fetchOptions, signal: AbortSignal.timeout(20_000) });
-    const body = await response.json().catch(() => ({}));
-    if (response.ok) return body;
-    const retryAfter = Number(response.headers.get("retry-after"));
-    if (response.status === 429 && retry429Once && attempt === 0 && Number.isFinite(retryAfter) && retryAfter >= 1 && retryAfter <= 240) {
-      await new Promise((resolve) => setTimeout(resolve, (retryAfter + 1) * 1_000));
-      continue;
-    }
-    const errorCode = typeof body.error === "object" ? body.error?.code : body.error;
-    const errorMessage = typeof body.error === "object" ? body.error?.message : body.message;
-    throw new Error(`${response.status} ${errorCode ?? "request_failed"}: ${errorMessage ?? "request failed"}; retry_after=${response.headers.get("retry-after") ?? "none"}`);
-  }
-  throw new Error("Request retry state exhausted");
+export async function jsonFetch(url, options = {}, fetchImpl = fetch) {
+  const response = await fetchImpl(url, { ...options, redirect: "error", signal: AbortSignal.timeout(20_000) });
+  const body = await response.json().catch(() => ({}));
+  if (response.ok) return body;
+  const errorCode = typeof body.error === "object" ? body.error?.code : body.error;
+  const errorMessage = typeof body.error === "object" ? body.error?.message : body.message;
+  throw new Error(`${response.status} ${errorCode ?? "request_failed"}: ${errorMessage ?? "request failed"}; retry_after=${response.headers.get("retry-after") ?? "none"}`);
 }
 
 export async function enrollAndProbe(env = process.env) {
@@ -137,7 +128,6 @@ export async function enrollAndProbe(env = process.env) {
 
   await new Promise((resolve) => setTimeout(resolve, 61_000));
   const completion = await jsonFetch("https://api.flop.network/v1/chat/completions", {
-    retry429Once: true,
     method: "POST",
     headers: {
       authorization: `Bearer ${enrollment.key}`,
