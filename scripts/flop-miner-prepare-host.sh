@@ -66,9 +66,26 @@ python3 -c 'import json;d=json.load(open("prepare-network.json"));assert d["rpc"
 docker pull "$WORKER"
 docker pull "$BACKEND"
 docker run --rm --network none --gpus all --entrypoint nvidia-smi "$BACKEND" --query-gpu=name,driver_version,memory.total --format=csv
-# CLI measures registered bytes; verification failure stops preparation.
-docker run --rm --network host -v /opt/flop-miner:/work "$CLI" --network devnet --rpc "$RPC" model fetch "$MODEL" --precision BF16 --output-dir /work/models/qwen2.5-0.5b-instruct --json > prepare-model.json
-python3 -c 'import json;d=json.load(open("prepare-model.json"));assert d.get("ok") is True,"Model fetch not verified"'
+# Reuse only a verified receipt on this exact host. Never redownload on an unexplained refusal.
+if [ ! -e prepare-model.json ]; then
+  docker run --rm --network host -v /opt/flop-miner:/work "$CLI" --network devnet --rpc "$RPC" model fetch "$MODEL" --precision BF16 --output-dir /work/models/qwen2.5-0.5b-instruct --json > prepare-model.json
+fi
+python3 - "$MODEL" <<'PY'
+import json,re,sys,pathlib
+p=pathlib.Path('prepare-model.json')
+assert p.is_file() and not p.is_symlink() and p.stat().st_size < 1048576
+d=json.loads(p.read_text())
+assert isinstance(d,dict)
+root=d.get('verified_root')
+err=d.get('error') or d.get('code')
+if isinstance(err,dict): err=err.get('code')
+if not isinstance(err,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,100}',err): err=None
+print(json.dumps({'fields':[k for k in d if re.fullmatch(r'[a-zA-Z0-9_-]{1,50}',k)][:40], 'ok': d.get('ok') if isinstance(d.get('ok'),bool) else None, 'verified_root':root if isinstance(root,str) and re.fullmatch(r'0x[a-f0-9]{64}',root) else None,'error_code':err}),flush=True)
+assert d.get('ok') is not False and d.get('success') is not False and not d.get('error'), 'CLI returned an explicit model refusal'
+assert root==sys.argv[1], 'Measured model root missing or mismatched'
+checkpoint=pathlib.Path('models/qwen2.5-0.5b-instruct')
+assert (checkpoint/'config.json').is_file() and any(p.is_file() for p in checkpoint.glob('*.safetensors')), 'Verified checkpoint files not present'
+PY
 if [ ! -e miner.env ]; then install -m 600 miner.env.example miner.env; fi
 python3 - "$CLI" "$WORKER" "$BACKEND" <<'PY'
 import os,secrets,sys
@@ -76,7 +93,7 @@ p="miner.env"
 assert not os.path.islink(p)
 lines=open(p).read().splitlines()
 updates=dict(zip(("FLOP_CLI","FLOP_WORKER_IMAGE","FLOP_BACKEND_IMAGE"),sys.argv[1:]))
-updates.update(WORKER_NAME="mabolla-devnet-miner-01",COMPOSE_PROJECT_NAME="mabolla-flop-miner",SESSION_BIND_IP="127.0.0.1",SESSION_HOST_PORT="8645")
+updates.update(WORKER_NAME="mabolla-devnet-miner-01",COMPOSE_PROJECT_NAME="mabolla-flop-miner",SESSION_BIND_IP="127.0.0.1",SESSION_HOST_PORT="8645",MODEL_NAME="Qwen/Qwen2.5-0.5B-Instruct",MODEL_HASH="0x1a52c1abe781db051e70ae357f72bb70161ca0c092df0b618f22a9292ba63306",MODEL_CHECKPOINT_DIR="/opt/flop-miner/models/qwen2.5-0.5b-instruct",MODEL_PRECISION="BF16",TOPLOC_PRECISION="bf16",OPENROUTER_MODEL_SLUG="qwen/qwen2.5-0.5b-instruct")
 existing=dict(x.split("=",1) for x in lines if x and not x.startswith("#") and "=" in x)
 for k in ("INFERENCE_API_KEY","SESSION_AUTH_TOKEN"):
     if not existing.get(k): updates[k]=secrets.token_hex(32)
