@@ -26,3 +26,16 @@ for l in sys.stdin:
  if not categories: unknown+=1
  for k in categories: counts[k]+=1
 print(json.dumps({"log_matches":total,"uncategorized":unknown,"categories":{k:v for k,v in counts.items() if v}}))'
+# Keep raw worker logs on the host. Emit only fixed public diagnostic vocabulary.
+"${C[@]}" logs --no-color --tail=350 worker </dev/null 2>&1 | python3 -c 'import re,sys,json
+v=set("error errors failed failure panic warn warning info debug level message unhandled rejection uncaught exception startup start restarting retry retrying attempt expected optional disabled deprecated ignored recovered transient permanent fatal type invalid missing denied unavailable disconnected refused closed abort aborted cancel cancelled unknown unsupported not found cannot could unable already running ready skipped exhausted session request response status authentication authorization unauthorized forbidden port binding address listen server http https cloudflared tunnel connection gateway mailbox ghost canary calibration proof settlement payment channel receipt wallet signer registration stake capacity chain block rpc model backend health policy worker service job jobs task execution result publish announced duplicate load timeout fetch network configuration config bootstrap read write file directory runtime docker cuda socket client stream transport endpoint advertise sign invalidated signature rejected eof reset expired resolve resolved errorcode reason polling startup indexer catalog openrouter store persistence warmup stopped shutdown signal code caught failed ignored no known cache issue conflict is was the to from for with in of and on at during due but will without by a an".split())
+for raw in sys.stdin:
+ if not re.search(r"\b(error|failed|panic)\b",raw,re.I): continue
+ msg=raw.split("|",1)[-1]; msg=re.sub(r"https?://\S+|\b0x[0-9a-fA-F]+\b|\b[a-zA-Z0-9_-]{16,}\b"," [hidden] ",msg)
+ words=re.findall(r"[A-Za-z]+|\b[1-5][0-9]{2}\b",msg)
+ safe=[]
+ for w in words:
+  w=w.lower()
+  if w in v or (w in {"400","401","403","404","409","429","500","502","503","504"}): safe.append(w)
+  elif not safe or safe[-1]!="…": safe.append("…")
+ print(json.dumps({"redacted_log_signature":" ".join(safe[:55])}))'
