@@ -96,7 +96,10 @@ updates=dict(zip(("FLOP_CLI","FLOP_WORKER_IMAGE","FLOP_BACKEND_IMAGE"),sys.argv[
 updates.update(WORKER_NAME="mabolla-devnet-miner-01",COMPOSE_PROJECT_NAME="mabolla-flop-miner",SESSION_BIND_IP="127.0.0.1",SESSION_HOST_PORT="8645",MODEL_NAME="Qwen/Qwen2.5-0.5B-Instruct",MODEL_HASH="0x1a52c1abe781db051e70ae357f72bb70161ca0c092df0b618f22a9292ba63306",MODEL_CHECKPOINT_DIR="/opt/flop-miner/models/qwen2.5-0.5b-instruct",MODEL_PRECISION="BF16",TOPLOC_PRECISION="bf16",OPENROUTER_MODEL_SLUG="qwen/qwen2.5-0.5b-instruct")
 existing=dict(x.split("=",1) for x in lines if x and not x.startswith("#") and "=" in x)
 for k in ("INFERENCE_API_KEY","SESSION_AUTH_TOKEN"):
-    if not existing.get(k): updates[k]=secrets.token_hex(32)
+    value=existing.get(k,"")
+    template=dict(x.split("=",1) for x in open("miner.env.example").read().splitlines() if x and not x.startswith("#") and "=" in x)
+    if not value or value==template.get(k): updates[k]=secrets.token_hex(32)
+    elif len(value)<32: raise SystemExit("Existing private session credential too short; no activation")
 out=[x for x in lines if x.split("=",1)[0] not in updates]
 out.extend(k+"="+v for k,v in updates.items())
 tmp=p+".preparing"
