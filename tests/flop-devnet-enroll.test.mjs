@@ -1,7 +1,31 @@
 import { generateKeyPairSync } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { identitiesFor, validateChallenge, validatePreflight, MABOLLA_SS58, DEVNET_GENESIS } from "../scripts/flop-devnet-enroll.mjs";
+import { identitiesFor, jsonFetch, validateChallenge, validatePreflight, MABOLLA_SS58, DEVNET_GENESIS } from "../scripts/flop-devnet-enroll.mjs";
+
+test("a 429 reports Retry-After without submitting a second request", async () => {
+  let calls = 0;
+  const mockFetch = async (_url, options) => {
+    calls += 1;
+    assert.equal(options.method, "POST");
+    assert.equal(options.redirect, "error");
+    return Response.json({ error: { code: "overloaded", message: "channel pool full" } }, {
+      status: 429, headers: { "Retry-After": "60" }
+    });
+  };
+  await assert.rejects(jsonFetch("https://api.flop.network/v1/chat/completions", { method: "POST" }, mockFetch), /429 overloaded.*retry_after=60/);
+  assert.equal(calls, 1);
+});
+
+test("an ambiguous network error is propagated without retrying a POST", async () => {
+  let calls = 0;
+  const mockFetch = async () => {
+    calls += 1;
+    throw new DOMException("timed out", "TimeoutError");
+  };
+  await assert.rejects(jsonFetch("https://api.flop.network/v1/chat/completions", { method: "POST" }, mockFetch), { name: "TimeoutError" });
+  assert.equal(calls, 1);
+});
 
 test("derives a DID and SS58 address from the same Ed25519 key", () => {
   const { privateKey } = generateKeyPairSync("ed25519");
