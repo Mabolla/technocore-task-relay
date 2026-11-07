@@ -4,56 +4,36 @@ on:
     inputs:
       mode:
         type: choice
-        options: [test-only, prepare-host, sponsor-existing, activate-registered]
+        options: [test-only]
         default: test-only
         required: true
       paid_host_authorized:
-        description: Existing Vast host is running with explicit user approval
         type: boolean
         default: false
         required: true
-permissions:
-  contents: read
-concurrency:
-  group: flop-miner-vast-59441078
-  cancel-in-progress: false
+permissions: {}
 jobs:
-  validate:
+  live-read-only:
+    if: inputs.mode == 'test-only' && inputs.paid_host_authorized == false
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
+    env:
+      FLOP_IMAGE: ghcr.io/flop-labs/flop-core/cli:v0.1.290@sha256:24e32b034b0d3600ee28127dad30d4228e623235f2dc62da34c2c85ba5e21a88
+      FLOP_RPC: wss://rpc.devnet.flop.network
+      FLOP_MINER: 5Ek2J6WSgcunfe8hLRpZRGnCa3aUmvZAMGM5ugfyJ2VhtrWw
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - name: Syntax and pure policy tests
-        run: |
-          set -euo pipefail
-          bash -n scripts/flop-miner-sponsor-existing.sh
-          bash -n scripts/flop-miner-prepare-host.sh
-          bash -n scripts/flop-miner-activate-host.sh
-          node --test tests/flop-miner-retry-policy.test.mjs
-  host:
-    needs: validate
-    if: inputs.mode != 'test-only' && inputs.paid_host_authorized == true
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - name: Run selected reviewed phase on existing host only
-        env:
-          SSH_KEY: ${{ secrets.VAST_FLOP_SSH_PRIVATE_KEY }}
-          MODE: ${{ inputs.mode }}
+      - name: Verify live Devnet and public miner status without a signer
         shell: bash
         run: |
           set -euo pipefail
-          umask 077
-          keyfile="$(mktemp)"
-          trap 'rm -f "$keyfile"' EXIT
-          printf '%s\n' "$SSH_KEY" > "$keyfile"
-          unset SSH_KEY
-          case "$MODE" in
-            prepare-host) script=scripts/flop-miner-prepare-host.sh; flag=--prepare-existing-host;;
-            sponsor-existing) script=scripts/flop-miner-sponsor-existing.sh; flag=--one-approved-retry;;
-            activate-registered) script=scripts/flop-miner-activate-host.sh; flag=--activate-registered-miner;;
-            *) exit 2;;
-          esac
-          ssh -i "$keyfile" -p 40369 -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new root@79.152.74.8 bash -s -- "$flag" < "$script"
-          printf '## Miner phase completed\nPhase: %s\nInstance: 59441078\nThis does not establish accepted calibration or successful paid inference.\n' "$MODE" >> "$GITHUB_STEP_SUMMARY"
+          docker pull "$FLOP_IMAGE"
+          docker run --rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges "$FLOP_IMAGE" --network devnet --rpc "$FLOP_RPC" network status --json | tee network.json
+          jq -e '.rpc.genesis_hash == "0x99c172c095340ace980631f9123544c6bebd4839f3437e463533422d8be2d631" and .faucet.matches_rpc == true' network.json
+          docker run --rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges "$FLOP_IMAGE" --network devnet --rpc "$FLOP_RPC" miner status "$FLOP_MINER" --json | tee miner.json
+          jq -e '(.registered | type == "boolean") and (.ok != false)' miner.json
+          {
+            printf '## Live read-only CLI probe\n'
+            printf 'Genesis matched. CLI image: %s\n\n' "$FLOP_IMAGE"
+            jq -r '"Public miner registered: " + (.registered | tostring)' miner.json
+            printf '\nNo signer, SSH, mounts, sponsorship, or Vast actions.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
