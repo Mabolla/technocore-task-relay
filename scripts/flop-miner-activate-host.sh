@@ -27,7 +27,7 @@ C=(docker compose --env-file miner.env -f docker-compose.miner.yml -f docker-com
 # Bounded health checks. These are read-only, never repeat signed requests.
 healthy=0
 for attempt in $(seq 1 6); do
-  if "${C[@]}" exec -T backend python3 -c 'import os,json,urllib.request as u;r=json.load(u.urlopen(u.Request("http://127.0.0.1:8000/health",headers={"Authorization":"Bearer "+os.environ["INFERENCE_API_KEY"]}),timeout=5));assert r.get("model_identity")=="measured";assert r.get("model_hash")=="0x1a52c1abe781db051e70ae357f72bb70161ca0c092df0b618f22a9292ba63306";assert r.get("decode_policy_hash")=="0xeca6a3f9c5a9fa1556892182ffef15b1273c075146a2d1a87814ae83ecea3053";print(json.dumps({k:r.get(k) for k in ("model_identity","model_hash","decode_policy_hash")}))' </dev/null > activation-backend-health.json 2>/dev/null; then healthy=1; break; fi
+  if "${C[@]}" exec -T backend python3 -c 'import os,json,urllib.request as u;r=json.load(u.urlopen(u.Request("http://127.0.0.1:8000/health",headers={"Authorization":"Bearer "+os.environ["INFERENCE_API_KEY"]}),timeout=5));assert r.get("model_identity")=="measured";assert str(r.get("model_hash")).removeprefix("0x").lower()=="1a52c1abe781db051e70ae357f72bb70161ca0c092df0b618f22a9292ba63306";assert str(r.get("decode_policy_hash")).removeprefix("0x").lower()=="eca6a3f9c5a9fa1556892182ffef15b1273c075146a2d1a87814ae83ecea3053";assert str(r.get("precision")).lower()=="bf16";print(json.dumps({k:r.get(k) for k in ("model_identity","model_hash","decode_policy_hash")}))' </dev/null > activation-backend-health.json 2>/dev/null; then healthy=1; break; fi
   sleep 10
 done
 if [ "$healthy" != 1 ]; then
