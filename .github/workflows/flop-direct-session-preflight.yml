@@ -9,7 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 212acbbf90e9a2034b152b11618160f0c36f845b
+          ref: c070811383d87246b176b3df063ea86d99dfc659
           persist-credentials: false
       - run: node --test flop-session-guard.test.mjs flop-direct-preflight.test.mjs flop-session-attempt.test.mjs flop-github-claim.test.mjs
       - run: node flop-direct-preflight.mjs
