@@ -1,0 +1,64 @@
+name: FLOP own miner — private connection preflight
+on: workflow_dispatch
+permissions:
+  contents: read
+concurrency:
+  group: flop-own-miner-direct
+  cancel-in-progress: false
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Verify existing Mabolla signer on runner
+        env:
+          FLOP_AGENT_KEY: ${{ secrets.TECHNOCORE_AGENT_PRIVATE_KEY }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { createPrivateKey, createPublicKey } from 'node:crypto';
+          try {
+            const key = createPrivateKey({ key: Buffer.from(process.env.FLOP_AGENT_KEY ?? '', 'base64'), format: 'der', type: 'pkcs8' });
+            if (key.asymmetricKeyType !== 'ed25519') throw Error();
+            const raw = Buffer.from(createPublicKey(key).export({ format: 'jwk' }).x, 'base64url');
+            const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+            let n = BigInt('0x' + Buffer.concat([Buffer.of(0xed, 1), raw]).toString('hex'));
+            let encoded = '';
+            while (n) { encoded = alphabet[Number(n % 58n)] + encoded; n /= 58n; }
+            if (encoded !== '6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG') throw Error();
+            console.log('Mabolla Ed25519 identity verified');
+          } catch {
+            console.error('Mabolla identity validation failed');
+            process.exitCode = 1;
+          }
+          NODE
+      - name: Verify pinned SSH connection and open a runner-local tunnel
+        env:
+          FLOP_SSH_KEY: ${{ secrets.VAST_FLOP_SSH_PRIVATE_KEY }}
+          FLOP_KNOWN_HOST: ${{ vars.VAST_FLOP_KNOWN_HOST }}
+        run: |
+          set -euo pipefail
+          test -n "$FLOP_SSH_KEY"
+          [[ "$FLOP_KNOWN_HOST" == '[79.152.74.8]:40369 ssh-ed25519 '* ]]
+          [[ "$FLOP_KNOWN_HOST" != *$'\n'* && "$FLOP_KNOWN_HOST" != *$'\r'* ]]
+          umask 077
+          temp_dir="$(mktemp -d)"
+          trap 'if [[ -n "${tunnel_pid:-}" ]]; then kill "$tunnel_pid" 2>/dev/null || true; fi; rm -f "$temp_dir/key" "$temp_dir/known_hosts"; rmdir "$temp_dir"' EXIT
+          printf '%s\n' "$FLOP_SSH_KEY" > "$temp_dir/key"
+          printf '%s\n' "$FLOP_KNOWN_HOST" > "$temp_dir/known_hosts"
+          unset FLOP_SSH_KEY FLOP_KNOWN_HOST
+          ssh -NT -p 40369 -i "$temp_dir/key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$temp_dir/known_hosts" \
+            -o ConnectTimeout=10 -o ExitOnForwardFailure=yes \
+            -L 127.0.0.1:8645:127.0.0.1:8645 root@79.152.74.8 &
+          tunnel_pid=$!
+          # An HTTP response proves the forwarded worker port is reachable;
+          # it does not prove worker readiness or authorize a live session.
+          for i in {1..10}; do
+            kill -0 "$tunnel_pid"
+            if curl -sS -o /dev/null --max-time 2 http://127.0.0.1:8645/ 2>/dev/null; then
+              echo 'Private worker HTTP transport reachable; no inference sent'
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
