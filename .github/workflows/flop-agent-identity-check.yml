@@ -1,0 +1,37 @@
+name: FLOP agent identity check
+on: workflow_dispatch
+permissions: {}
+jobs:
+  identity:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Verify existing key without signing
+        env:
+          AGENT_KEY: ${{ secrets.TECHNOCORE_AGENT_PRIVATE_KEY }}
+        run: |
+          node --input-type=module <<'JS'
+          import {createPrivateKey,createPublicKey,createHash} from 'node:crypto';
+          try {
+            const key = createPrivateKey({key:Buffer.from(process.env.AGENT_KEY ?? '', 'base64'),format:'der',type:'pkcs8'});
+            if (key.asymmetricKeyType !== 'ed25519') throw Error();
+            const raw = Buffer.from(createPublicKey(key).export({format:'jwk'}).x,'base64url');
+            if (raw.length !== 32) throw Error();
+            const encode = bytes => {
+              const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+              let n = BigInt('0x'+bytes.toString('hex')), out = '';
+              while (n) { out = alphabet[Number(n%58n)] + out; n /= 58n; }
+              return out;
+            };
+            const did = 'did:key:z'+encode(Buffer.concat([Buffer.of(237,1),raw]));
+            const body = Buffer.concat([Buffer.of(42),raw]);
+            const checksum = createHash('blake2b512').update('SS58PRE').update(body).digest().subarray(0,2);
+            if (did !== 'did:key:z6MkfRm7VkjC52pff11L12dbFkChhVkiZqv5Wwd7VMo3fCsG' ||
+                encode(Buffer.concat([body,checksum])) !== '5CPgb5pfqurJbZZT6ts99wCc3Npdjtfxs4VMxNnstLap1omn') throw Error();
+            console.log('Mabolla public identity matched; no signature created.');
+          } catch {
+            console.error('Mabolla identity could not be verified.');
+            process.exitCode = 1;
+          }
+          JS
