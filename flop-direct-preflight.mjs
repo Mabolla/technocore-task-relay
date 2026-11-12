@@ -7,14 +7,18 @@ const explorer = 'https://explorer.devnet.flop.network';
 export function verify(rpcGenesis, row, finalizedHeight) {
   if (rpcGenesis !== genesis) throw Error('Devnet genesis mismatch');
   const c = row?.calibration;
-  if (row?.address !== miner || row.isActive !== true || row.blacklisted !== false ||
-      c?.phase !== 'Active' || c.leaseState !== 'active' || c.observationHead !== 'finalized' ||
-      !Number.isSafeInteger(c.observedAtBlock) || c.observedAtBlock <= 0 ||
-      !Number.isSafeInteger(finalizedHeight) || finalizedHeight < c.observedAtBlock ||
-      finalizedHeight - c.observedAtBlock > 120 ||
-      !Number.isSafeInteger(c.expiresAtBlock) || c.expiresAtBlock <= finalizedHeight) {
-    throw Error('Active miner calibration not verified');
-  }
+  if (row?.address !== miner || row.isActive !== true || row.blacklisted !== false)
+    throw Error('Expected active miner identity not verified');
+  if (c?.phase !== 'Active' || c.leaseState !== 'active')
+    throw Error('Explorer did not report an active calibration lease');
+  if (c.observationHead !== 'finalized' || !Number.isSafeInteger(c.observedAtBlock) || c.observedAtBlock <= 0)
+    throw Error('Explorer calibration has no valid finalized observation');
+  if (!Number.isSafeInteger(finalizedHeight) || finalizedHeight < c.observedAtBlock)
+    throw Error('RPC finalized height is invalid or behind Explorer observation');
+  if (finalizedHeight - c.observedAtBlock > 120)
+    throw Error('Explorer calibration observation is stale relative to RPC');
+  if (!Number.isSafeInteger(c.expiresAtBlock) || c.expiresAtBlock <= finalizedHeight)
+    throw Error('Calibration expiry is missing or already reached');
   return { miner, observedAtBlock: c.observedAtBlock, expiresAtBlock: c.expiresAtBlock };
 }
 
