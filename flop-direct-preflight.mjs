@@ -18,10 +18,17 @@ export function verify(rpcGenesis, row, finalizedHeight) {
   return { miner, observedAtBlock: c.observedAtBlock, expiresAtBlock: c.expiresAtBlock };
 }
 
-async function read(url, options) {
-  const res = await fetch(url, { ...options, redirect: 'error', signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw Error(`Read-only endpoint returned HTTP ${res.status}`);
-  return res.json();
+export async function read(url, options, { label, request = fetch,
+  pause = () => new Promise(resolve => setTimeout(resolve, 1500)) } = {}) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await request(url, { ...options, redirect: 'error', signal: AbortSignal.timeout(15000) });
+    if (res.ok) return res.json();
+    if (attempt === 0 && [502, 503, 504].includes(res.status) && !res.headers?.has('retry-after')) {
+      await pause();
+      continue;
+    }
+    throw Error(`${label ?? 'Read-only endpoint'} returned HTTP ${res.status}`);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -29,13 +36,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const response = await read('https://rpc.devnet.flop.network', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-    });
+    }, { label: `Devnet RPC ${method}` });
     if (response?.error || response?.result == null) throw Error('RPC observation unavailable');
     return response.result;
   };
   const [rpcGenesis, row] = await Promise.all([
     rpc('chain_getBlockHash', [0]),
-    read(`${explorer}/api/miners/${miner}`),
+    read(`${explorer}/api/miners/${miner}`, undefined, { label: 'Explorer miner calibration' }),
   ]);
   const head = await rpc('chain_getFinalizedHead');
   if (!/^0x[0-9a-f]{64}$/i.test(head)) throw Error('Invalid finalized head');
