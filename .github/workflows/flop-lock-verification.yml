@@ -1,0 +1,24 @@
+name: FLOP test-tag lock verification
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Confirm duplicate test tag cannot be created
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = Mabolla/technocore-task-relay
+          tag=flop-lock-verification-test-v1
+          api="repos/$GITHUB_REPOSITORY/git/refs"
+          gh api "$api" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" --jq .object.sha | grep -Fx "$GITHUB_SHA"
+          if gh api "$api" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" >duplicate.log 2>&1; then
+            echo 'Duplicate unexpectedly accepted'
+            exit 1
+          fi
+          grep -Ei 'Reference already exists' duplicate.log
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq .object.sha | grep -Fx "$GITHUB_SHA"
