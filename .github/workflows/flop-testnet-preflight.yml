@@ -1,0 +1,16 @@
+name: FLOP Testnet read-only preflight
+on: workflow_dispatch
+permissions:
+  contents: read
+concurrency:
+  group: mabolla-flop-testnet
+  cancel-in-progress: false
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: node --test tests/flop-testnet-preflight.test.mjs
+      - name: Verify public identity and Testnet without signing
+        run: node scripts/flop-testnet-preflight.mjs >> "$GITHUB_STEP_SUMMARY"
