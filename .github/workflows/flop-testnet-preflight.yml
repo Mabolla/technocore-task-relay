@@ -18,6 +18,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - run: node --test tests/flop-testnet-preflight.test.mjs
       - name: Verify public identity and Testnet without signing
+        if: "!inputs.claim"
         run: node scripts/flop-testnet-preflight.mjs >> "$GITHUB_STEP_SUMMARY"
 
       - name: Submit one Testnet faucet claim
@@ -51,7 +52,7 @@ jobs:
             const request=(url,body)=>fetch(url,{redirect:'error',signal:AbortSignal.timeout(15000),...(body?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{})});
             stage='network and limits';
             const checks=await Promise.all([request('https://testnet.flop.network/',{jsonrpc:'2.0',id:1,method:'chain_getBlockHash',params:[0]}),request(faucet+'/chain'),request(faucet+'/limits')]);
-            if(checks.some(x=>!x.ok)) throw Error();
+            if(checks.some(x=>!x.ok)){console.error('HTTP status (RPC genesis / faucet chain / faucet limits): '+checks.map(x=>x.status).join(' / '));throw Error();}
             const [rpc,chain,limits]=await Promise.all(checks.map(x=>x.json()));
             if(rpc.result!==genesis || chain.network!=='testnet' || chain.genesisHash!==genesis || limits.network!=='testnet' || limits.stale!==false || limits.faucet?.status!=='open' || limits.faucet.agent?.claimPath!==path || limits.faucet.agent.grantFlop!==10) throw Error();
             stage='claim submission (check outcome before any new claim)';
